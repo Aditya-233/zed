@@ -113,9 +113,8 @@ pub fn init(cx: &mut App) {
         let Some(window) = window else {
             return;
         };
-        let multi_workspace = workspace.multi_workspace().cloned();
-        let item = cx.new(|cx| TitleBar::new("title-bar", workspace, multi_workspace, window, cx));
-        workspace.set_titlebar_item(item.into(), window, cx);
+        // Title bar removed by default to maximize vertical screen space:
+        // Do not instantiate TitleBar or attach it to the workspace.
 
         workspace.register_action(|_workspace, _: &UseClassicLayout, _window, cx| {
             set_window_layout(WindowLayout::Editor(None), cx);

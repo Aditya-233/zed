@@ -1,0 +1,42 @@
+name: Build Linux Package (No Titlebar)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-x86_64:
+    name: Build Linux x86_64 (No Titlebar)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          ./script/linux
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          targets: wasm32-wasip2, wasm32-unknown-unknown, x86_64-unknown-linux-musl
+
+      - name: Build Zed Release Package
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          ./script/bundle-linux
+
+      - name: Upload Linux Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-linux-x86_64-no-titlebar
+          path: target/release/zed-linux-x86_64.tar.gz
+          if-no-files-found: warn
