@@ -7,7 +7,7 @@ use crate::{
     searchable::SearchableItemHandle,
     workspace_settings::{AutosaveSetting, WorkspaceSettings},
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use client::{Client, proto};
 use futures::channel::mpsc;
 use gpui::{
@@ -316,6 +316,14 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
     ) -> Task<Result<()>> {
         unimplemented!("save_as() must be implemented if can_save() returns true")
     }
+    fn save_elevated(
+        &mut self,
+        _project: Entity<Project>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        Task::ready(Err(anyhow!("save_elevated is not supported for this item")))
+    }
     fn reload(
         &mut self,
         _project: Entity<Project>,
@@ -543,6 +551,12 @@ pub trait ItemHandle: 'static + Send {
         &self,
         project: Entity<Project>,
         path: ProjectPath,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<()>>;
+    fn save_elevated(
+        &self,
+        project: Entity<Project>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<()>>;
@@ -1083,6 +1097,15 @@ impl<T: Item> ItemHandle for Entity<T> {
         cx: &mut App,
     ) -> Task<anyhow::Result<()>> {
         self.update(cx, |item, cx| item.save_as(project, path, window, cx))
+    }
+
+    fn save_elevated(
+        &self,
+        project: Entity<Project>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<()>> {
+        self.update(cx, |item, cx| item.save_elevated(project, window, cx))
     }
 
     fn reload(

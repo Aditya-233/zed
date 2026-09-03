@@ -67,31 +67,66 @@ fi
 # Generate the licenses first, so they can be baked into the binaries
 script/generate-licenses
 
-if "$rustup_installed"; then
+if "$rustup_installed" && [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
     rustup target add "$remote_server_triple"
 fi
 
 export CC=${CC:-$(which clang)}
 
 # Build binary in release mode
-# We need lld to link libwebrtc.a successfully on aarch64-linux.
-# NOTE: Since RUSTFLAGS env var overrides all .cargo/config.toml rustflags
-# (see https://github.com/rust-lang/cargo/issues/5376), the
-# [target.aarch64-unknown-linux-gnu] section in config.toml has no effect here.
-if [[ "$(uname -m)" == "aarch64" ]]; then
-    export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+# Use mold if available for ultra-fast linking on Linux x86_64, or lld on aarch64.
+if command -v mold >/dev/null 2>&1; then
+    LINKER_FLAGS="-C link-arg=-fuse-ld=mold"
+elif [[ "$(uname -m)" == "aarch64" ]]; then
+    LINKER_FLAGS="-C link-arg=-fuse-ld=lld"
 else
-    export RUSTFLAGS="${RUSTFLAGS:-} -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+    LINKER_FLAGS=""
 fi
-cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli
-# Build remote_server in separate invocation to prevent feature unification from other crates
-# from influencing dynamic libraries required by it.
-if [[ "$remote_server_triple" == "$musl_triple" ]]; then
-    export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
-    musl_cc_var="CC_$(echo "$remote_server_triple" | tr '-' '_')"
-    export "$musl_cc_var"=musl-gcc
+export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli --timings
+
+# Print crate compilation timing summary
+python3 - << 'PY_EOF' || true
+import glob, json, os, re
+
+timing_files = glob.glob("target/**/cargo-timings/cargo-timing.html", recursive=True)
+if timing_files:
+    latest_timing = max(timing_files, key=os.path.getmtime)
+    print(f"\n📊 Compilation Timing Report: {latest_timing}")
+    try:
+        with open(latest_timing, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        match = re.search(r'const\s+pipeline_units\s*=\s*(\[.*?\]);', content, re.DOTALL) or \
+                re.search(r'const\s+units\s*=\s*(\[.*?\]);', content, re.DOTALL) or \
+                re.search(r'var\s+unit_data\s*=\s*(\[.*?\]);', content, re.DOTALL)
+
+        if match:
+            units = json.loads(match.group(1))
+            sorted_units = sorted(units, key=lambda u: u.get('duration', u.get('end', 0) - u.get('start', 0)), reverse=True)
+            print("=" * 70)
+            print(f"{'CRATE NAME':<40} | {'DURATION':<12} | {'CODEGEN':<12}")
+            print("-" * 70)
+            for u in sorted_units[:35]:
+                name = u.get('name', 'unknown')
+                dur = u.get('duration', u.get('end', 0) - u.get('start', 0))
+                codegen = u.get('codegen_duration', 0)
+                print(f"{name:<40} | {dur:>9.2f}s  | {codegen:>9.2f}s")
+            print("=" * 70 + "\n")
+    except Exception as e:
+        print(f"Notice: Could not parse timing summary: {e}")
+PY_EOF
+
+
+# Build remote_server only when explicitly enabled (saves ~22 minutes in CI)
+if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
+    if [[ "$remote_server_triple" == "$musl_triple" ]]; then
+        export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
+        musl_cc_var="CC_$(echo "$remote_server_triple" | tr '-' '_')"
+        export "$musl_cc_var"=musl-gcc
+    fi
+    cargo --config .cargo/bundle-config.toml build --release --target "${remote_server_triple}" --package remote_server
 fi
-cargo --config .cargo/bundle-config.toml build --release --target "${remote_server_triple}" --package remote_server
 
 # Upload debug info to sentry.io
 if ! command -v sentry-cli >/dev/null 2>&1; then
@@ -100,13 +135,15 @@ if ! command -v sentry-cli >/dev/null 2>&1; then
 else
     if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
         echo "Uploading zed debug symbols to sentry..."
+        sentry_binaries=("${target_dir}/${target_triple}/release/zed")
+        if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
+            sentry_binaries+=("${target_dir}/${remote_server_triple}/release/remote_server")
+        fi
         # note: this uploads the unstripped binary which is needed because it contains
         # .eh_frame data for stack unwinding. see https://github.com/getsentry/symbolic/issues/783
         for attempt in 1 2 3; do
             echo "Attempting sentry upload (attempt $attempt/3)..."
-            if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev \
-                "${target_dir}/${target_triple}"/release/zed \
-                "${target_dir}/${remote_server_triple}"/release/remote_server; then
+            if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev "${sentry_binaries[@]}"; then
                 echo "Sentry upload successful on attempt $attempt"
                 break
             else
@@ -128,17 +165,20 @@ fi
 # We use llvm-objcopy because GNU objcopy on older distros (e.g. Ubuntu 20.04)
 # doesn't understand CREL sections produced by newer LLVM.
 llvm-objcopy --only-keep-debug "${target_dir}/${target_triple}/release/zed" "${target_dir}/${target_triple}/release/zed.dbg"
-llvm-objcopy --only-keep-debug "${target_dir}/${remote_server_triple}/release/remote_server" "${target_dir}/${remote_server_triple}/release/remote_server.dbg"
 llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/zed"
 llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/cli"
-llvm-objcopy --strip-debug --discard-all "${target_dir}/${remote_server_triple}/release/remote_server"
 
-# Ensure that remote_server does not depend on libssl nor libcrypto, as we got rid of these deps.
-if ldd "${target_dir}/${remote_server_triple}/release/remote_server" | grep -q 'libcrypto\|libssl'; then
-    if [[ "$remote_server_triple" == *-musl ]]; then
-        echo "Error: remote_server still depends on libssl or libcrypto" && exit 1
-    else
-        echo "Info: Using non-musl remote-server build."
+if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
+    llvm-objcopy --only-keep-debug "${target_dir}/${remote_server_triple}/release/remote_server" "${target_dir}/${remote_server_triple}/release/remote_server.dbg"
+    llvm-objcopy --strip-debug --discard-all "${target_dir}/${remote_server_triple}/release/remote_server"
+
+    # Ensure that remote_server does not depend on libssl nor libcrypto, as we got rid of these deps.
+    if ldd "${target_dir}/${remote_server_triple}/release/remote_server" | grep -q 'libcrypto\|libssl'; then
+        if [[ "$remote_server_triple" == *-musl ]]; then
+            echo "Error: remote_server still depends on libssl or libcrypto" && exit 1
+        else
+            echo "Info: Using non-musl remote-server build."
+        fi
     fi
 fi
 
@@ -155,7 +195,7 @@ zed_dir="${temp_dir}/zed$suffix.app"
 # Binary
 mkdir -p "${zed_dir}/bin" "${zed_dir}/libexec"
 cp "${target_dir}/${target_triple}/release/zed" "${zed_dir}/libexec/zed-editor"
-cp "${target_dir}/${target_triple}/release/cli" "${zed_dir}/bin/zed"
+cp "${target_dir}/${target_triple}/release/cli" "${zed_dir}/bin/zeditor"
 
 # Libs
 # Bundle libstdc++ so older supported systems can run binaries built with our
@@ -183,7 +223,7 @@ cp "crates/zed/resources/app-icon$suffix@2x.png" "${zed_dir}/share/icons/hicolor
 
 # .desktop
 export DO_STARTUP_NOTIFY="true"
-export APP_CLI="zed"
+export APP_CLI="zeditor"
 export APP_ICON="zed"
 export APP_ARGS="%U"
 if [[ "$channel" == "preview" ]]; then
@@ -216,4 +256,6 @@ remove_match="zed(-[a-zA-Z0-9]+)?-linux-$(uname -m)\.tar\.gz"
 ls "${target_dir}/release" | grep -E ${remove_match} | xargs -d "\n" -I {} rm -f "${target_dir}/release/{}" || true
 tar -czvf "${target_dir}/release/$archive" -C ${temp_dir} "zed$suffix.app"
 
-gzip -f --stdout --best "${target_dir}/${remote_server_triple}/release/remote_server" > "${target_dir}/zed-remote-server-linux-${arch}.gz"
+if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
+    gzip -f --stdout --best "${target_dir}/${remote_server_triple}/release/remote_server" > "${target_dir}/zed-remote-server-linux-${arch}.gz"
+fi

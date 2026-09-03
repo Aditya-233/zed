@@ -482,6 +482,10 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    if util::run_file_write_if_invoked() {
+        return Ok(());
+    }
+
     #[cfg(unix)]
     util::prevent_root_execution();
 

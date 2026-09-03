@@ -48,10 +48,11 @@ type PasswordPrompt = (
     oneshot::Receiver<()>,
 );
 
+#[derive(Clone)]
 pub struct AskPassDelegate {
     tx: mpsc::UnboundedSender<PasswordPrompt>,
     executor: BackgroundExecutor,
-    _task: Task<()>,
+    _task: Arc<Task<()>>,
 }
 
 impl AskPassDelegate {
@@ -86,7 +87,7 @@ impl AskPassDelegate {
         });
         Self {
             tx,
-            _task: task,
+            _task: Arc::new(task),
             executor: cx.background_executor().clone(),
         }
     }

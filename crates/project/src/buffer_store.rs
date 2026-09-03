@@ -4,6 +4,7 @@ use crate::{
     worktree_store::{WorktreeStore, WorktreeStoreEvent},
 };
 use anyhow::{Context as _, Result, anyhow};
+use askpass::{AskPassDelegate, AskPassResult, AskPassSession};
 use client::Client;
 use collections::{HashMap, HashSet, hash_map};
 use futures::{Future, FutureExt as _, StreamExt as _, channel::oneshot, future::Shared};
@@ -447,6 +448,159 @@ impl LocalBufferStore {
         })
     }
 
+    fn save_local_buffer_elevated(
+        &self,
+        buffer_handle: Entity<Buffer>,
+        worktree: Entity<Worktree>,
+        path: Arc<RelPath>,
+        askpass: Option<AskPassDelegate>,
+        cx: &mut Context<BufferStore>,
+    ) -> Task<Result<()>> {
+        let buffer = buffer_handle.read(cx);
+        let text = buffer.as_rope().clone();
+        let line_ending = buffer.line_ending();
+        let version = buffer.version();
+        let abs_path = worktree.read(cx).absolutize(&path);
+
+        cx.spawn(async move |this, cx| {
+            let mut temp_file = tempfile::NamedTempFile::new()?;
+            let text_string = match line_ending {
+                LineEnding::Unix => text.to_string(),
+                LineEnding::Windows => text.to_string().replace('\n', "\r\n"),
+            };
+            std::io::Write::write_all(&mut temp_file, text_string.as_bytes())?;
+            std::io::Write::flush(&mut temp_file)?;
+            let temp_path = temp_file.path().to_path_buf();
+
+            let current_exe = std::env::current_exe()?;
+
+            let run_elevated = async {
+                let mut last_error = String::new();
+
+                // 1. Try native Zed AskPass modal via sudo -A (Zero external GUI tools/agents required)
+                if let Some(delegate) = askpass {
+                    if which::which("sudo").is_ok() {
+                        let mut askpass_session =
+                            AskPassSession::new(cx.background_executor().clone(), delegate).await?;
+
+                        let mut cmd = util::command::new_command("sudo");
+                        cmd.arg("-A");
+                        cmd.env("SUDO_ASKPASS", askpass_session.script_path());
+                        #[cfg(target_os = "windows")]
+                        cmd.env("ZED_ASKPASS_SOCKET", askpass_session.socket_path());
+                        cmd.arg(&current_exe)
+                            .arg("--file-write")
+                            .arg(&temp_path)
+                            .arg(&abs_path);
+
+                        let child = cmd.spawn()?;
+                        let askpass_run = askpass_session.run(None);
+
+                        let output = futures::select_biased! {
+                            result = askpass_run.fuse() => {
+                                match result {
+                                    AskPassResult::CancelledByUser => {
+                                        anyhow::bail!("Elevated save cancelled by user");
+                                    }
+                                    AskPassResult::Timedout => {
+                                        anyhow::bail!("Authentication timed out");
+                                    }
+                                }
+                            }
+                            res = child.output().fuse() => res?,
+                        };
+
+                        if output.status.success() {
+                            return Ok(());
+                        } else {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            if !err.trim().is_empty() {
+                                last_error = err.trim().to_string();
+                            }
+                        }
+                    }
+                }
+
+                // 2. Try pkexec (standard graphical polkit escalation if agent is available)
+                if which::which("pkexec").is_ok() {
+                    let mut cmd = util::command::new_command("pkexec");
+                    cmd.arg(&current_exe)
+                        .arg("--file-write")
+                        .arg(&temp_path)
+                        .arg(&abs_path);
+                    if let Ok(output) = cmd.output().await {
+                        if output.status.success() {
+                            return Ok(());
+                        } else {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            if !err.trim().is_empty() {
+                                last_error = err.trim().to_string();
+                            }
+                        }
+                    }
+                }
+
+                // 3. Try sudo with SUDO_ASKPASS or cached credentials
+                if which::which("sudo").is_ok() {
+                    let mut cmd = util::command::new_command("sudo");
+                    if std::env::var("SUDO_ASKPASS").is_ok() {
+                        cmd.arg("-A");
+                    } else {
+                        cmd.arg("-n");
+                    }
+                    cmd.arg(&current_exe)
+                        .arg("--file-write")
+                        .arg(&temp_path)
+                        .arg(&abs_path);
+                    if let Ok(output) = cmd.output().await {
+                        if output.status.success() {
+                            return Ok(());
+                        } else {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            if !err.trim().is_empty() {
+                                last_error = err.trim().to_string();
+                            }
+                        }
+                    }
+                }
+
+                if last_error.contains("cancelled by user") {
+                    anyhow::bail!("Elevated save was cancelled.");
+                } else if last_error.is_empty() {
+                    anyhow::bail!(
+                        "Elevated save failed: could not authenticate with superuser privileges."
+                    );
+                } else {
+                    anyhow::bail!("Elevated save failed: {}", last_error);
+                }
+            };
+
+            run_elevated.await?;
+
+            let refresh_task = this.update(cx, |_, cx| {
+                worktree.update(cx, |worktree, cx| {
+                    worktree
+                        .as_local_mut()
+                        .map(|w| w.refresh_entry(path.clone(), None, cx))
+                })
+            })?;
+
+            let entry = if let Some(task) = refresh_task {
+                task.await.log_err().flatten()
+            } else {
+                None
+            };
+
+            let mtime = entry.and_then(|e| e.mtime);
+
+            buffer_handle.update(cx, |buffer, cx| {
+                buffer.did_save(version.clone(), mtime, cx);
+            });
+
+            Ok(())
+        })
+    }
+
     fn subscribe_to_worktree(
         &mut self,
         worktree: &Entity<Worktree>,
@@ -661,6 +815,19 @@ impl LocalBufferStore {
         self.save_local_buffer(buffer, worktree, file.path.clone(), false, cx)
     }
 
+    pub(crate) fn save_buffer_elevated(
+        &self,
+        buffer: Entity<Buffer>,
+        askpass: Option<AskPassDelegate>,
+        cx: &mut Context<BufferStore>,
+    ) -> Task<Result<()>> {
+        let Some(file) = File::from_dyn(buffer.read(cx).file()) else {
+            return Task::ready(Err(anyhow!("buffer doesn't have a file")));
+        };
+        let worktree = file.worktree.clone();
+        self.save_local_buffer_elevated(buffer, worktree, file.path.clone(), askpass, cx)
+    }
+
     fn save_buffer_as(
         &self,
         buffer: Entity<Buffer>,
@@ -689,7 +856,7 @@ impl LocalBufferStore {
             let path = path.clone();
             let buffer = match load_file.await {
                 Ok(loaded) => {
-                    let is_writable = loaded.is_writable;
+                    let is_writable = loaded.is_writable || loaded.file.is_local;
                     let capability = if is_writable {
                         Capability::ReadWrite
                     } else {
@@ -979,6 +1146,20 @@ impl BufferStore {
         match &mut self.state {
             BufferStoreState::Local(this) => this.save_buffer(buffer, cx),
             BufferStoreState::Remote(this) => this.save_remote_buffer(buffer, None, cx),
+        }
+    }
+
+    pub fn save_buffer_elevated(
+        &mut self,
+        buffer: Entity<Buffer>,
+        askpass: Option<AskPassDelegate>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        match &mut self.state {
+            BufferStoreState::Local(this) => this.save_buffer_elevated(buffer, askpass, cx),
+            BufferStoreState::Remote(_) => {
+                Task::ready(Err(anyhow!("cannot save remote buffer with sudo")))
+            }
         }
     }
 

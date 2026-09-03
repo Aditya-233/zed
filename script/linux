@@ -38,6 +38,7 @@ if [[ -n $apt ]]; then
     clang
     lld
     llvm
+    mold
     jq
     git
     curl

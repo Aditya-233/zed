@@ -244,6 +244,100 @@ Error: Running Zed as root or via sudo is unsupported.
     }
 }
 
+/// Handles elevated file write requests if `--file-write <source> <target>` is passed in args.
+/// If invoked, this performs the write operation and exits the process directly.
+/// Returns false if `--file-write` was not invoked.
+pub fn run_file_write_if_invoked() -> bool {
+    let mut args = std::env::args_os();
+    args.next();
+    while let Some(arg) = args.next() {
+        if arg == "--file-write" {
+            let Some(source) = args.next() else {
+                eprintln!("Error: --file-write requires <source> and <target> paths");
+                std::process::exit(1);
+            };
+            let Some(target) = args.next() else {
+                eprintln!("Error: --file-write requires <source> and <target> paths");
+                std::process::exit(1);
+            };
+            if let Err(e) =
+                execute_file_write(std::path::Path::new(&source), std::path::Path::new(&target))
+            {
+                eprintln!("Error writing file: {:#}", e);
+                std::process::exit(1);
+            }
+            std::process::exit(0);
+        }
+    }
+    false
+}
+
+fn execute_file_write(source: &std::path::Path, target: &std::path::Path) -> Result<()> {
+    use std::io::Write as _;
+
+    // Normalize paths by stripping any trailing separators (e.g. "/etc/pacman.conf/" -> "/etc/pacman.conf")
+    let source_str = source.to_string_lossy();
+    let source_trimmed = source_str.trim_end_matches(['/', '\\']);
+    let source_buf;
+    let source: &std::path::Path = if source_trimmed.is_empty() {
+        source
+    } else {
+        source_buf = std::path::PathBuf::from(source_trimmed);
+        &source_buf
+    };
+
+    let target_str = target.to_string_lossy();
+    let target_trimmed = target_str.trim_end_matches(['/', '\\']);
+    let target_buf;
+    let target: &std::path::Path = if target_trimmed.is_empty() {
+        target
+    } else {
+        target_buf = std::path::PathBuf::from(target_trimmed);
+        &target_buf
+    };
+
+    if target.is_dir() {
+        anyhow::bail!(
+            "Target path exists and is a directory: {}",
+            target.display()
+        );
+    }
+    if !source.is_file() {
+        anyhow::bail!("Source path must be an existing file: {}", source.display());
+    }
+    if !source.is_absolute() || !target.is_absolute() {
+        anyhow::bail!("Both source and target must be absolute paths");
+    }
+    if source == target {
+        anyhow::bail!("Source and target must not be the same path");
+    }
+    if target.exists() && !target.is_file() {
+        anyhow::bail!(
+            "Target path exists but is not a regular file: {}",
+            target.display()
+        );
+    }
+
+    #[cfg(unix)]
+    let orig_mode = {
+        use std::os::unix::fs::PermissionsExt as _;
+        target.metadata().ok().map(|m| m.permissions().mode())
+    };
+
+    let data = std::fs::read(source)?;
+    let mut file = std::fs::File::create(target)?;
+    file.write_all(&data)?;
+    file.sync_all()?;
+
+    #[cfg(unix)]
+    if let Some(mode) = orig_mode {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(mode));
+    }
+
+    Ok(())
+}
+
 #[cfg(unix)]
 fn load_shell_from_passwd() -> Result<()> {
     let buflen = match unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) } {

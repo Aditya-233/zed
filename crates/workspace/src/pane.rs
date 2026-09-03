@@ -2447,7 +2447,7 @@ impl Pane {
             }
 
             if can_save {
-                pane.update_in(cx, |pane, window, cx| {
+                let save_result = pane.update_in(cx, |pane, window, cx| {
                     pane.unpreview_item_if_preview(item.item_id());
                     item.save(
                         SaveOptions {
@@ -2455,12 +2455,49 @@ impl Pane {
                             force_format,
                             autosave: false,
                         },
-                        project,
+                        project.clone(),
                         window,
                         cx,
                     )
                 })?
-                .await?;
+                .await;
+
+                if let Err(err) = save_result {
+                    let is_perm_error = err.chain().any(|e| {
+                        if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                            io_err.kind() == std::io::ErrorKind::PermissionDenied
+                        } else {
+                            let s = e.to_string().to_lowercase();
+                            s.contains("permission denied") || s.contains("operation not permitted")
+                        }
+                    });
+
+                    if is_perm_error {
+                        let title = cx.update(|_, cx| item.tab_content_text(0, cx))?;
+                        let answer = pane.update_in(cx, |pane, window, cx| {
+                            pane.activate_item(item_ix, true, true, window, cx);
+                            window.prompt(
+                                PromptLevel::Warning,
+                                &format!("Failed to save '{title}': Insufficient permissions."),
+                                Some("Select 'Retry as Sudo' to retry with superuser privileges."),
+                                &["Retry as Sudo", "Cancel"],
+                                cx,
+                            )
+                        })?;
+
+                        if answer.await == Ok(0) {
+                            pane.update_in(cx, |_, window, cx| {
+                                item.save_elevated(project, window, cx)
+                            })?
+                            .await?;
+                            return Ok(true);
+                        } else {
+                            return Ok(false);
+                        }
+                    } else {
+                        return Err(err);
+                    }
+                }
             } else if can_save_as && is_singleton {
                 let suggested_name =
                     cx.update(|_window, cx| item.suggested_filename(cx).to_string())?;
