@@ -11,7 +11,7 @@ else
     version="$(cargo metadata --no-deps --format-version=1 2>/dev/null | python3 -c 'import sys, json; data=json.load(sys.stdin); print(next(p["version"] for p in data["packages"] if p["name"] == "zed"))' 2>/dev/null || grep -m1 '^version = ' Cargo.toml | cut -d'\"' -f2)"
 fi
 pkgver="${version}"
-pkgrel="2"
+pkgrel="3"
 arch="x86_64"
 repo_name="custom-zed"
 
@@ -97,7 +97,8 @@ depend = freetype2
 depend = vulkan-driver
 depend = hicolor-icon-theme
 optdepend = clang: C/C++ language server (clangd) support
-optdepend = polkit: Elevated sudo save (pkexec) support
+optdepend = sudo: Native in-window superuser save elevation
+optdepend = polkit: Graphical pkexec elevation fallback
 provides = zeditor
 conflict = zed
 conflict = zed-preview
@@ -190,14 +191,14 @@ hicolor-icon-theme
 
 %OPTDEPENDS%
 clang: C/C++ language server (clangd) support
-polkit: Elevated sudo save (pkexec) support
+sudo: Native in-window superuser save elevation
+polkit: Graphical pkexec elevation fallback
 DESC_EOF
 
     cat << FILES_EOF > "${pkg_entry}/files"
 %FILES%
 usr/
 usr/bin/
-usr/bin/zed
 usr/bin/zeditor
 usr/lib/
 usr/lib/zed/

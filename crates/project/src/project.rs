@@ -3451,14 +3451,17 @@ impl Project {
     pub fn save_buffers_elevated(
         &self,
         buffers: HashSet<Entity<Buffer>>,
+        askpass: Option<askpass::AskPassDelegate>,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         cx.spawn(async move |this, cx| {
-            let save_tasks = buffers.into_iter().filter_map(|buffer| {
-                this.update(cx, |this, cx| this.save_buffer_elevated(buffer, cx))
-                    .ok()
-            });
-            try_join_all(save_tasks).await?;
+            for buffer in buffers {
+                let askpass_clone = askpass.clone();
+                let task = this.update(cx, |this, cx| {
+                    this.save_buffer_elevated(buffer, askpass_clone, cx)
+                })?;
+                task.await?;
+            }
             Ok(())
         })
     }
@@ -3466,10 +3469,11 @@ impl Project {
     pub fn save_buffer_elevated(
         &self,
         buffer: Entity<Buffer>,
+        askpass: Option<askpass::AskPassDelegate>,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         self.buffer_store
-            .update(cx, |buffer_store, cx| buffer_store.save_buffer_elevated(buffer, cx))
+            .update(cx, |buffer_store, cx| buffer_store.save_buffer_elevated(buffer, askpass, cx))
     }
 
     pub fn save_buffer_as(

@@ -12,6 +12,8 @@
 //!
 //! If you're looking to improve Vim mode, you should check out Vim crate that wraps Editor and overrides its behavior.
 pub mod actions;
+pub mod askpass_modal;
+pub use askpass_modal::AskPassModal;
 pub mod blink_manager;
 mod bracket_colorization;
 mod clangd_ext;

@@ -1042,11 +1042,40 @@ impl Item for Editor {
                 .collect()
         };
 
+        let workspace = self.workspace.as_ref().and_then(|(w, _)| w.upgrade());
+        let askpass_delegate = if let Some(workspace) = workspace {
+            let window_handle = window.window_handle();
+            Some(askpass::AskPassDelegate::new_with_cancellation(
+                &mut cx.to_async(),
+                move |prompt, tx, cancellation, cx| {
+                    window_handle
+                        .update(cx, |_, window, cx| {
+                            workspace.update(cx, |workspace, cx| {
+                                workspace.toggle_modal(window, cx, |window, cx| {
+                                    crate::AskPassModal::new_with_icon(
+                                        "Superuser Authentication".into(),
+                                        prompt.into(),
+                                        ui::IconName::Lock,
+                                        tx,
+                                        cancellation,
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            });
+                        })
+                        .ok();
+                },
+            ))
+        } else {
+            None
+        };
+
         cx.spawn_in(window, async move |_this, cx| {
             if !buffers_to_save.is_empty() {
                 project
                     .update(cx, |project, cx| {
-                        project.save_buffers_elevated(buffers_to_save.clone(), cx)
+                        project.save_buffers_elevated(buffers_to_save.clone(), askpass_delegate, cx)
                     })
                     .await?;
             }

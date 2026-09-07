@@ -1,7 +1,7 @@
 # Maintainer: Aditya <aditya@local>
 pkgname=zed-minimal
 pkgver=1.20.0
-pkgrel=2
+pkgrel=3
 pkgdesc="Ultra-minimal, fast, offline, Wayland-exclusive code editor"
 arch=('x86_64')
 url="https://github.com/Aditya-233/zed"
@@ -16,7 +16,8 @@ depends=(
 )
 optdepends=(
     'clang: C/C++ language server (clangd) support'
-    'polkit: Elevated sudo save (pkexec) support'
+    'sudo: Native in-window superuser save elevation'
+    'polkit: Graphical pkexec elevation fallback'
 )
 provides=('zeditor')
 conflicts=('zed' 'zed-preview' 'zed-nightly')
