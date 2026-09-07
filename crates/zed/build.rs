@@ -73,13 +73,7 @@ fn main() {
             println!("cargo:rustc-env=ZED_BUILD_ID={build_identifier}");
         }
 
-        if let Ok(build_profile) = std::env::var("PROFILE")
-            && build_profile == "release"
-        {
-            // This is currently the best way to make `cargo build ...`'s build script
-            // to print something to stdout without extra verbosity.
-            println!("cargo::warning=Info: using '{git_sha}' hash for ZED_COMMIT_SHA env var");
-        }
+
     }
 
     if cfg!(windows) {

@@ -27,11 +27,11 @@ echo -n "" >"$OUTPUT_FILE"
     echo -e "\n# ###### CODE LICENSES ######\n"
 } >>"$OUTPUT_FILE"
 
-if ! cargo about --version | grep "cargo-about $CARGO_ABOUT_VERSION" &>/dev/null; then
+if ! command -v cargo-about &>/dev/null && ! cargo about --version &>/dev/null; then
     echo "Installing cargo-about@$CARGO_ABOUT_VERSION..."
-    cargo install "cargo-about@$CARGO_ABOUT_VERSION"
+    cargo +1.97.1 install "cargo-about@$CARGO_ABOUT_VERSION" --features cli --locked
 else
-    echo "cargo-about@$CARGO_ABOUT_VERSION is already installed."
+    echo "cargo-about is already installed."
 fi
 
 echo "Generating cargo licenses"

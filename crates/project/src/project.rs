@@ -3448,6 +3448,30 @@ impl Project {
             .update(cx, |buffer_store, cx| buffer_store.save_buffer(buffer, cx))
     }
 
+    pub fn save_buffers_elevated(
+        &self,
+        buffers: HashSet<Entity<Buffer>>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        cx.spawn(async move |this, cx| {
+            let save_tasks = buffers.into_iter().filter_map(|buffer| {
+                this.update(cx, |this, cx| this.save_buffer_elevated(buffer, cx))
+                    .ok()
+            });
+            try_join_all(save_tasks).await?;
+            Ok(())
+        })
+    }
+
+    pub fn save_buffer_elevated(
+        &self,
+        buffer: Entity<Buffer>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        self.buffer_store
+            .update(cx, |buffer_store, cx| buffer_store.save_buffer_elevated(buffer, cx))
+    }
+
     pub fn save_buffer_as(
         &mut self,
         buffer: Entity<Buffer>,

@@ -447,6 +447,81 @@ impl LocalBufferStore {
         })
     }
 
+    fn save_local_buffer_elevated(
+        &self,
+        buffer_handle: Entity<Buffer>,
+        worktree: Entity<Worktree>,
+        path: Arc<RelPath>,
+        cx: &mut Context<BufferStore>,
+    ) -> Task<Result<()>> {
+        let buffer = buffer_handle.read(cx);
+        let text = buffer.as_rope().clone();
+        let line_ending = buffer.line_ending();
+        let version = buffer.version();
+        let abs_path = worktree.read(cx).abs_path().join(path.as_ref());
+
+        cx.spawn(async move |this, cx| {
+            let mut temp_file = tempfile::NamedTempFile::new()?;
+            let text_string = match line_ending {
+                LineEnding::Unix => text.to_string(),
+                LineEnding::Windows => text.to_string().replace('\n', "\r\n"),
+            };
+            std::io::Write::write_all(&mut temp_file, text_string.as_bytes())?;
+            std::io::Write::flush(&mut temp_file)?;
+            let temp_path = temp_file.path().to_path_buf();
+
+            let current_exe = std::env::current_exe()?;
+
+            let run_elevated = async {
+                if which::which("pkexec").is_ok() {
+                    let mut cmd = util::command::new_command("pkexec");
+                    cmd.arg(&current_exe)
+                        .arg("--file-write")
+                        .arg(&temp_path)
+                        .arg(&abs_path);
+                    if let Ok(output) = cmd.output().await {
+                        if output.status.success() {
+                            return Ok(());
+                        }
+                    }
+                }
+                let mut cmd = util::command::new_command("sudo");
+                cmd.arg(&current_exe)
+                    .arg("--file-write")
+                    .arg(&temp_path)
+                    .arg(&abs_path);
+                let output = cmd.output().await?;
+                if !output.status.success() {
+                    let err = String::from_utf8_lossy(&output.stderr);
+                    anyhow::bail!("Elevated save failed: {}", err.trim());
+                }
+                Ok(())
+            };
+
+            run_elevated.await?;
+
+            let refresh_task = this.update(cx, |_, cx| {
+                worktree.update(cx, |worktree, cx| {
+                    worktree.as_local_mut().map(|w| w.refresh_entry(path.clone(), None, cx))
+                })
+            })?;
+
+            let entry = if let Some(task) = refresh_task {
+                task.await.log_err().flatten()
+            } else {
+                None
+            };
+
+            let mtime = entry.and_then(|e| e.mtime);
+
+            buffer_handle.update(cx, |buffer, cx| {
+                buffer.did_save(version.clone(), mtime, cx);
+            });
+
+            Ok(())
+        })
+    }
+
     fn subscribe_to_worktree(
         &mut self,
         worktree: &Entity<Worktree>,
@@ -661,6 +736,18 @@ impl LocalBufferStore {
         self.save_local_buffer(buffer, worktree, file.path.clone(), false, cx)
     }
 
+    fn save_buffer_elevated(
+        &self,
+        buffer: Entity<Buffer>,
+        cx: &mut Context<BufferStore>,
+    ) -> Task<Result<()>> {
+        let Some(file) = File::from_dyn(buffer.read(cx).file()) else {
+            return Task::ready(Err(anyhow!("buffer doesn't have a file")));
+        };
+        let worktree = file.worktree.clone();
+        self.save_local_buffer_elevated(buffer, worktree, file.path.clone(), cx)
+    }
+
     fn save_buffer_as(
         &self,
         buffer: Entity<Buffer>,
@@ -689,7 +776,7 @@ impl LocalBufferStore {
             let path = path.clone();
             let buffer = match load_file.await {
                 Ok(loaded) => {
-                    let is_writable = loaded.is_writable;
+                    let is_writable = loaded.is_writable || loaded.file.is_local;
                     let capability = if is_writable {
                         Capability::ReadWrite
                     } else {
@@ -979,6 +1066,19 @@ impl BufferStore {
         match &mut self.state {
             BufferStoreState::Local(this) => this.save_buffer(buffer, cx),
             BufferStoreState::Remote(this) => this.save_remote_buffer(buffer, None, cx),
+        }
+    }
+
+    pub fn save_buffer_elevated(
+        &mut self,
+        buffer: Entity<Buffer>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        match &mut self.state {
+            BufferStoreState::Local(this) => this.save_buffer_elevated(buffer, cx),
+            BufferStoreState::Remote(_) => {
+                Task::ready(Err(anyhow!("cannot save remote buffer with sudo")))
+            }
         }
     }
 

@@ -206,6 +206,10 @@ fn main() {
     // own arguments.
     sandbox::run_sandbox_launcher_if_invoked();
 
+    if util::run_file_write_if_invoked() {
+        return;
+    }
+
     #[cfg(unix)]
     util::prevent_root_execution();
 

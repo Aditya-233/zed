@@ -109,8 +109,8 @@ pub fn init(cx: &mut App) {
     cx.observe_global::<SettingsStore>(update_layout_action_filter)
         .detach();
 
-    cx.observe_new(|workspace: &mut Workspace, window, cx| {
-        let Some(window) = window else {
+    cx.observe_new(|workspace: &mut Workspace, window, _cx| {
+        let Some(_window) = window else {
             return;
         };
         // Title bar removed by default to maximize vertical screen space:

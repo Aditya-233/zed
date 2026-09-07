@@ -1018,6 +1018,42 @@ impl Item for Editor {
         })
     }
 
+    fn save_elevated(
+        &mut self,
+        project: Entity<Project>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        let buffers = self.buffer().clone().read(cx).all_buffers();
+        let buffers = buffers
+            .into_iter()
+            .map(|handle| handle.read(cx).base_buffer().unwrap_or(handle.clone()))
+            .collect::<HashSet<_>>();
+
+        let buffers_to_save = if self.buffer.read(cx).is_singleton() {
+            buffers
+        } else {
+            buffers
+                .into_iter()
+                .filter(|buffer| {
+                    let buffer = buffer.read(cx);
+                    buffer.is_dirty() && buffer.file().is_some()
+                })
+                .collect()
+        };
+
+        cx.spawn_in(window, async move |_this, cx| {
+            if !buffers_to_save.is_empty() {
+                project
+                    .update(cx, |project, cx| {
+                        project.save_buffers_elevated(buffers_to_save.clone(), cx)
+                    })
+                    .await?;
+            }
+            Ok(())
+        })
+    }
+
     fn save_as(
         &mut self,
         project: Entity<Project>,
