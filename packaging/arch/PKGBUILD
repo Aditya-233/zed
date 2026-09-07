@@ -1,7 +1,7 @@
 # Maintainer: Aditya <aditya@local>
 pkgname=zed-minimal
 pkgver=1.20.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Ultra-minimal, fast, offline, Wayland-exclusive code editor"
 arch=('x86_64')
 url="https://github.com/Aditya-233/zed"
@@ -18,8 +18,8 @@ optdepends=(
     'clang: C/C++ language server (clangd) support'
     'polkit: Elevated sudo save (pkexec) support'
 )
-provides=('zed' 'zeditor')
-conflicts=('zed' 'zeditor' 'zed-preview' 'zed-nightly')
+provides=('zeditor')
+conflicts=('zed' 'zed-preview' 'zed-nightly')
 
 package() {
     # If using pre-built app directory from script/bundle-linux
@@ -28,10 +28,13 @@ package() {
         cd "$src_dir/zed.app"
     fi
 
-    # Install binaries
+    # Install binaries exclusively as zeditor (no zed binary or symlink)
     install -Dm755 "libexec/zed-editor" "$pkgdir/usr/lib/zed/zed-editor"
-    install -Dm755 "bin/zed" "$pkgdir/usr/bin/zed"
-    ln -sf zed "$pkgdir/usr/bin/zeditor"
+    if [ -f "bin/zeditor" ]; then
+        install -Dm755 "bin/zeditor" "$pkgdir/usr/bin/zeditor"
+    elif [ -f "bin/zed" ]; then
+        install -Dm755 "bin/zed" "$pkgdir/usr/bin/zeditor"
+    fi
 
     # Install bundled libraries if any exist
     if [ -d "lib" ] && [ "$(ls -A lib 2>/dev/null)" ]; then

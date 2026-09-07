@@ -11,7 +11,7 @@ else
     version="$(cargo metadata --no-deps --format-version=1 2>/dev/null | python3 -c 'import sys, json; data=json.load(sys.stdin); print(next(p["version"] for p in data["packages"] if p["name"] == "zed"))' 2>/dev/null || grep -m1 '^version = ' Cargo.toml | cut -d'\"' -f2)"
 fi
 pkgver="${version}"
-pkgrel="1"
+pkgrel="2"
 arch="x86_64"
 repo_name="custom-zed"
 
@@ -47,10 +47,15 @@ mkdir -p "${pkgroot}/usr/lib/zed" \
          "${pkgroot}/usr/share/icons/hicolor/1024x1024/apps" \
          "${pkgroot}/usr/share/licenses/zed-minimal"
 
-# Copy binaries
+# Copy binaries - exclusively as /usr/bin/zeditor (NO /usr/bin/zed)
 cp -a "${src_app}/libexec/zed-editor" "${pkgroot}/usr/lib/zed/zed-editor"
-cp -a "${src_app}/bin/zed" "${pkgroot}/usr/bin/zed"
-ln -sf zed "${pkgroot}/usr/bin/zeditor"
+if [[ -f "${src_app}/bin/zeditor" ]]; then
+    cp -a "${src_app}/bin/zeditor" "${pkgroot}/usr/bin/zeditor"
+elif [[ -f "${src_app}/bin/zed" ]]; then
+    cp -a "${src_app}/bin/zed" "${pkgroot}/usr/bin/zeditor"
+fi
+chmod 755 "${pkgroot}/usr/bin/zeditor"
+rm -f "${pkgroot}/usr/bin/zed"
 
 # Copy bundled libs if any
 if [[ -d "${src_app}/lib" ]] && [[ "$(ls -A "${src_app}/lib" 2>/dev/null)" ]]; then
@@ -61,6 +66,10 @@ fi
 cp -a "${src_app}/share/applications/"* "${pkgroot}/usr/share/applications/"
 cp -a "${src_app}/share/icons/hicolor/512x512/apps/"* "${pkgroot}/usr/share/icons/hicolor/512x512/apps/"
 cp -a "${src_app}/share/icons/hicolor/1024x1024/apps/"* "${pkgroot}/usr/share/icons/hicolor/1024x1024/apps/"
+
+# Ensure desktop entry invokes zeditor exclusively
+sed -i 's/^TryExec=.*/TryExec=zeditor/' "${pkgroot}/usr/share/applications/"*.desktop 2>/dev/null || true
+sed -i 's/^Exec=zed\([ @%]\)/Exec=zeditor\1/' "${pkgroot}/usr/share/applications/"*.desktop 2>/dev/null || true
 
 if [[ -f "${src_app}/licenses.md" ]]; then
     cp -a "${src_app}/licenses.md" "${pkgroot}/usr/share/licenses/zed-minimal/licenses.md"
@@ -89,10 +98,8 @@ depend = vulkan-driver
 depend = hicolor-icon-theme
 optdepend = clang: C/C++ language server (clangd) support
 optdepend = polkit: Elevated sudo save (pkexec) support
-provides = zed
 provides = zeditor
 conflict = zed
-conflict = zeditor
 conflict = zed-preview
 conflict = zed-nightly
 PKGINFO_EOF
