@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+
+set -euxo pipefail
+
+# 1. Determine release metadata
+target_dir="${CARGO_TARGET_DIR:-target}"
+channel=$(<crates/zed/RELEASE_CHANNEL)
+if command -v jq >/dev/null 2>&1; then
+    version="$(script/get-crate-version zed)"
+else
+    version="$(cargo metadata --no-deps --format-version=1 2>/dev/null | python3 -c 'import sys, json; data=json.load(sys.stdin); print(next(p["version"] for p in data["packages"] if p["name"] == "zed"))' 2>/dev/null || grep -m1 '^version = ' Cargo.toml | cut -d'\"' -f2)"
+fi
+pkgver="${version}"
+pkgrel="1"
+arch="x86_64"
+repo_name="custom-zed"
+
+repo_dir="$(pwd)/${target_dir}/release/arch-repo"
+mkdir -p "${repo_dir}"
+
+echo "Building Arch Linux Package for Zed ${pkgver}-${pkgrel} (${arch})..."
+
+# 2. Extract or locate bundle directory
+temp_pkg=$(mktemp -d)
+trap 'rm -rf "${temp_pkg}"' EXIT
+
+app_tar="${target_dir}/release/zed-linux-${arch}.tar.gz"
+if [[ -f "${app_tar}" ]]; then
+    tar -xzf "${app_tar}" -C "${temp_pkg}"
+else
+    echo "Error: ${app_tar} not found. Run ./script/bundle-linux first." >&2
+    exit 1
+fi
+
+suffix=""
+if [ "$channel" != "stable" ]; then
+  suffix="-$channel"
+fi
+src_app="${temp_pkg}/zed$suffix.app"
+
+# 3. Construct Arch rootfs hierarchy
+pkgroot="${temp_pkg}/pkgroot"
+mkdir -p "${pkgroot}/usr/lib/zed" \
+         "${pkgroot}/usr/bin" \
+         "${pkgroot}/usr/share/applications" \
+         "${pkgroot}/usr/share/icons/hicolor/512x512/apps" \
+         "${pkgroot}/usr/share/icons/hicolor/1024x1024/apps" \
+         "${pkgroot}/usr/share/licenses/zed-minimal"
+
+# Copy binaries
+cp -a "${src_app}/libexec/zed-editor" "${pkgroot}/usr/lib/zed/zed-editor"
+cp -a "${src_app}/bin/zed" "${pkgroot}/usr/bin/zed"
+ln -sf zed "${pkgroot}/usr/bin/zeditor"
+
+# Copy bundled libs if any
+if [[ -d "${src_app}/lib" ]] && [[ "$(ls -A "${src_app}/lib" 2>/dev/null)" ]]; then
+    cp -a "${src_app}/lib" "${pkgroot}/usr/lib/zed/"
+fi
+
+# Copy desktop and icons
+cp -a "${src_app}/share/applications/"* "${pkgroot}/usr/share/applications/"
+cp -a "${src_app}/share/icons/hicolor/512x512/apps/"* "${pkgroot}/usr/share/icons/hicolor/512x512/apps/"
+cp -a "${src_app}/share/icons/hicolor/1024x1024/apps/"* "${pkgroot}/usr/share/icons/hicolor/1024x1024/apps/"
+
+if [[ -f "${src_app}/licenses.md" ]]; then
+    cp -a "${src_app}/licenses.md" "${pkgroot}/usr/share/licenses/zed-minimal/licenses.md"
+fi
+
+# 4. Generate .PKGINFO metadata
+installed_size=$(du -sb "${pkgroot}" | cut -f1)
+build_date=$(date +%s)
+
+cat << PKGINFO_EOF > "${pkgroot}/.PKGINFO"
+pkgname = zed-minimal
+pkgbase = zed-minimal
+pkgver = ${pkgver}-${pkgrel}
+pkgdesc = Ultra-minimal, fast, offline, Wayland-exclusive code editor
+url = https://github.com/Aditya-233/zed
+builddate = ${build_date}
+packager = Aditya <aditya@local>
+size = ${installed_size}
+arch = ${arch}
+license = GPL-3.0-or-later
+depend = gcc-libs
+depend = glibc
+depend = fontconfig
+depend = freetype2
+depend = vulkan-driver
+depend = hicolor-icon-theme
+optdepend = clang: C/C++ language server (clangd) support
+optdepend = polkit: Elevated sudo save (pkexec) support
+provides = zed
+provides = zeditor
+conflict = zed
+conflict = zeditor
+conflict = zed-preview
+conflict = zed-nightly
+PKGINFO_EOF
+
+# 5. Generate .MTREE
+(cd "${pkgroot}" && bsdtar -czf .MTREE --format=mtree \
+  --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' \
+  . 2>/dev/null || true)
+
+# 6. Compress into .pkg.tar.zst
+pkg_file="zed-minimal-${pkgver}-${pkgrel}-${arch}.pkg.tar.zst"
+(cd "${pkgroot}" && bsdtar -cf - .PKGINFO $([[ -f .MTREE ]] && echo .MTREE) usr | zstd -T0 -19 -f -o "${repo_dir}/${pkg_file}")
+echo "Arch package generated at: ${repo_dir}/${pkg_file}"
+
+# 7. Update Pacman Repository Database with repo-add
+if command -v repo-add >/dev/null 2>&1; then
+    echo "Running native repo-add..."
+    (cd "${repo_dir}" && repo-add -n -R "${repo_name}.db.tar.gz" "${pkg_file}")
+elif command -v docker >/dev/null 2>&1; then
+    echo "Running repo-add via Arch Linux Docker container..."
+    docker run --rm -v "${repo_dir}":/repo -w /repo archlinux:latest bash -c \
+      "pacman -Sy --noconfirm pacman-contrib >/dev/null 2>&1 && repo-add -n -R ${repo_name}.db.tar.gz ${pkg_file}"
+else
+    echo "Warning: repo-add not found and Docker not available. Generating repository database manually..."
+    db_staging=$(mktemp -d)
+    pkg_entry="${db_staging}/zed-minimal-${pkgver}-${pkgrel}"
+    mkdir -p "${pkg_entry}"
+    cat << DESC_EOF > "${pkg_entry}/desc"
+%FILENAME%
+${pkg_file}
+
+%NAME%
+zed-minimal
+
+%BASE%
+zed-minimal
+
+%VERSION%
+${pkgver}-${pkgrel}
+
+%DESC%
+Ultra-minimal, fast, offline, Wayland-exclusive code editor
+
+%CSIZE%
+$(stat -c%s "${repo_dir}/${pkg_file}")
+
+%ISIZE%
+${installed_size}
+
+%MD5SUM%
+$(md5sum "${repo_dir}/${pkg_file}" | cut -d' ' -f1)
+
+%SHA256SUM%
+$(sha256sum "${repo_dir}/${pkg_file}" | cut -d' ' -f1)
+
+%URL%
+https://github.com/Aditya-233/zed
+
+%LICENSE%
+GPL-3.0-or-later
+
+%ARCH%
+${arch}
+
+%BUILDDATE%
+${build_date}
+
+%PACKAGER%
+Aditya <aditya@local>
+
+%PROVIDES%
+zed
+zeditor
+
+%CONFLICTS%
+zed
+zeditor
+zed-preview
+zed-nightly
+
+%DEPENDS%
+gcc-libs
+glibc
+fontconfig
+freetype2
+vulkan-driver
+hicolor-icon-theme
+
+%OPTDEPENDS%
+clang: C/C++ language server (clangd) support
+polkit: Elevated sudo save (pkexec) support
+DESC_EOF
+
+    cat << FILES_EOF > "${pkg_entry}/files"
+%FILES%
+usr/
+usr/bin/
+usr/bin/zed
+usr/bin/zeditor
+usr/lib/
+usr/lib/zed/
+usr/lib/zed/zed-editor
+usr/share/
+usr/share/applications/
+usr/share/applications/dev.zed.Zed.desktop
+usr/share/icons/
+usr/share/icons/hicolor/
+usr/share/icons/hicolor/512x512/
+usr/share/icons/hicolor/512x512/apps/
+usr/share/icons/hicolor/512x512/apps/zed.png
+usr/share/icons/hicolor/1024x1024/
+usr/share/icons/hicolor/1024x1024/apps/
+usr/share/icons/hicolor/1024x1024/apps/zed.png
+usr/share/licenses/
+usr/share/licenses/zed-minimal/
+usr/share/licenses/zed-minimal/licenses.md
+FILES_EOF
+    (cd "${db_staging}" && tar -czf "${repo_dir}/${repo_name}.db.tar.gz" *)
+    (cd "${db_staging}" && tar -czf "${repo_dir}/${repo_name}.files.tar.gz" *)
+    rm -rf "${db_staging}"
+fi
+
+# 8. Duplicate .db.tar.gz as .db and .files.tar.gz as .files
+# Remove symlinks first so cp creates real files without 'same file' error
+rm -f "${repo_dir}/${repo_name}.db" "${repo_dir}/${repo_name}.files"
+cp -f "${repo_dir}/${repo_name}.db.tar.gz" "${repo_dir}/${repo_name}.db"
+cp -f "${repo_dir}/${repo_name}.files.tar.gz" "${repo_dir}/${repo_name}.files"
+
+echo "=== Arch Linux Repository Generation Complete ==="
+ls -la "${repo_dir}"

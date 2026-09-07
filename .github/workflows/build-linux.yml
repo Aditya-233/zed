@@ -58,9 +58,34 @@ jobs:
         run: |
           ./script/bundle-linux
 
-      - name: Upload Linux Package Artifact
+      - name: Build Arch Linux Pacman Package & Repository
+        run: |
+          ./script/package-arch
+
+      - name: Upload Linux Tarball Artifact
         uses: actions/upload-artifact@v7
         with:
           name: zed-linux-x86_64-no-titlebar
           path: target/release/zed-linux-x86_64.tar.gz
           if-no-files-found: warn
+
+      - name: Upload Arch Linux Repository Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: zed-arch-repo
+          path: target/release/arch-repo/*
+          if-no-files-found: warn
+
+      - name: Publish Pacman Repository to GitHub Release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view repo >/dev/null 2>&1; then
+            gh release upload repo target/release/arch-repo/* --clobber
+          else
+            gh release create repo target/release/arch-repo/* \
+              --title "Custom Zed Arch Linux Repository" \
+              --notes "Automated Pacman repository for custom minimal Zed on Arch Linux. Add this repository to /etc/pacman.conf to receive automated updates on 'pacman -Syu'."
+          fi
+

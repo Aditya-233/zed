@@ -1,0 +1,57 @@
+# Maintainer: Aditya <aditya@local>
+pkgname=zed-minimal
+pkgver=1.20.0
+pkgrel=1
+pkgdesc="Ultra-minimal, fast, offline, Wayland-exclusive code editor"
+arch=('x86_64')
+url="https://github.com/Aditya-233/zed"
+license=('GPL-3.0-or-later')
+depends=(
+    'gcc-libs'
+    'glibc'
+    'fontconfig'
+    'freetype2'
+    'vulkan-driver'
+    'hicolor-icon-theme'
+)
+optdepends=(
+    'clang: C/C++ language server (clangd) support'
+    'polkit: Elevated sudo save (pkexec) support'
+)
+provides=('zed' 'zeditor')
+conflicts=('zed' 'zeditor' 'zed-preview' 'zed-nightly')
+
+package() {
+    # If using pre-built app directory from script/bundle-linux
+    local src_dir="${srcdir:-.}"
+    if [ -d "$src_dir/zed.app" ]; then
+        cd "$src_dir/zed.app"
+    fi
+
+    # Install binaries
+    install -Dm755 "libexec/zed-editor" "$pkgdir/usr/lib/zed/zed-editor"
+    install -Dm755 "bin/zed" "$pkgdir/usr/bin/zed"
+    ln -sf zed "$pkgdir/usr/bin/zeditor"
+
+    # Install bundled libraries if any exist
+    if [ -d "lib" ] && [ "$(ls -A lib 2>/dev/null)" ]; then
+        install -d "$pkgdir/usr/lib/zed/lib"
+        cp -a lib/* "$pkgdir/usr/lib/zed/lib/"
+    fi
+
+    # Install desktop launcher and icons
+    if [ -f "share/applications/dev.zed.Zed.desktop" ]; then
+        install -Dm644 "share/applications/dev.zed.Zed.desktop" "$pkgdir/usr/share/applications/dev.zed.Zed.desktop"
+    fi
+    if [ -f "share/icons/hicolor/512x512/apps/zed.png" ]; then
+        install -Dm644 "share/icons/hicolor/512x512/apps/zed.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/zed.png"
+    fi
+    if [ -f "share/icons/hicolor/1024x1024/apps/zed.png" ]; then
+        install -Dm644 "share/icons/hicolor/1024x1024/apps/zed.png" "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/zed.png"
+    fi
+
+    # Install licenses
+    if [ -f "licenses.md" ]; then
+        install -Dm644 "licenses.md" "$pkgdir/usr/share/licenses/$pkgname/licenses.md"
+    fi
+}
