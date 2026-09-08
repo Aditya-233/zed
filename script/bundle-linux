@@ -83,7 +83,40 @@ else
     LINKER_FLAGS=""
 fi
 export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
-cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli
+cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli --timings
+
+# Print crate compilation timing summary
+python3 - << 'PY_EOF' || true
+import glob, json, os, re
+
+timing_files = glob.glob("target/**/cargo-timings/cargo-timing.html", recursive=True)
+if timing_files:
+    latest_timing = max(timing_files, key=os.path.getmtime)
+    print(f"\n📊 Compilation Timing Report: {latest_timing}")
+    try:
+        with open(latest_timing, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        match = re.search(r'const\s+pipeline_units\s*=\s*(\[.*?\]);', content, re.DOTALL) or \
+                re.search(r'const\s+units\s*=\s*(\[.*?\]);', content, re.DOTALL) or \
+                re.search(r'var\s+unit_data\s*=\s*(\[.*?\]);', content, re.DOTALL)
+
+        if match:
+            units = json.loads(match.group(1))
+            sorted_units = sorted(units, key=lambda u: u.get('duration', u.get('end', 0) - u.get('start', 0)), reverse=True)
+            print("=" * 70)
+            print(f"{'CRATE NAME':<40} | {'DURATION':<12} | {'CODEGEN':<12}")
+            print("-" * 70)
+            for u in sorted_units[:35]:
+                name = u.get('name', 'unknown')
+                dur = u.get('duration', u.get('end', 0) - u.get('start', 0))
+                codegen = u.get('codegen_duration', 0)
+                print(f"{name:<40} | {dur:>9.2f}s  | {codegen:>9.2f}s")
+            print("=" * 70 + "\n")
+    except Exception as e:
+        print(f"Notice: Could not parse timing summary: {e}")
+PY_EOF
+
 
 # Build remote_server only when explicitly enabled (saves ~22 minutes in CI)
 if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then

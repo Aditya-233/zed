@@ -1,7 +1,7 @@
 # Maintainer: Aditya <aditya@local>
 pkgname=zed-minimal
 pkgver=1.20.0
-pkgrel=3
+pkgrel=4
 pkgdesc="Ultra-minimal, fast, offline, Wayland-exclusive code editor"
 arch=('x86_64')
 url="https://github.com/Aditya-233/zed"

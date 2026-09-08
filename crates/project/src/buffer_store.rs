@@ -1,10 +1,10 @@
-use askpass::{AskPassDelegate, AskPassResult, AskPassSession};
 use crate::{
     ProjectPath,
     lsp_store::OpenLspBufferHandle,
     worktree_store::{WorktreeStore, WorktreeStoreEvent},
 };
 use anyhow::{Context as _, Result, anyhow};
+use askpass::{AskPassDelegate, AskPassResult, AskPassSession};
 use client::Client;
 use collections::{HashMap, HashSet, hash_map};
 use futures::{Future, FutureExt as _, StreamExt as _, channel::oneshot, future::Shared};
@@ -460,7 +460,7 @@ impl LocalBufferStore {
         let text = buffer.as_rope().clone();
         let line_ending = buffer.line_ending();
         let version = buffer.version();
-        let abs_path = worktree.read(cx).abs_path().join(path.as_ref());
+        let abs_path = worktree.read(cx).absolutize(&path);
 
         cx.spawn(async move |this, cx| {
             let mut temp_file = tempfile::NamedTempFile::new()?;
@@ -567,7 +567,9 @@ impl LocalBufferStore {
                 if last_error.contains("cancelled by user") {
                     anyhow::bail!("Elevated save was cancelled.");
                 } else if last_error.is_empty() {
-                    anyhow::bail!("Elevated save failed: could not authenticate with superuser privileges.");
+                    anyhow::bail!(
+                        "Elevated save failed: could not authenticate with superuser privileges."
+                    );
                 } else {
                     anyhow::bail!("Elevated save failed: {}", last_error);
                 }
@@ -577,7 +579,9 @@ impl LocalBufferStore {
 
             let refresh_task = this.update(cx, |_, cx| {
                 worktree.update(cx, |worktree, cx| {
-                    worktree.as_local_mut().map(|w| w.refresh_entry(path.clone(), None, cx))
+                    worktree
+                        .as_local_mut()
+                        .map(|w| w.refresh_entry(path.clone(), None, cx))
                 })
             })?;
 

@@ -5561,6 +5561,7 @@ version = "0.1.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
+ "askpass",
  "assets",
  "base64 0.22.1",
  "breadcrumbs",
@@ -5639,6 +5640,7 @@ dependencies = [
  "vim_mode_setting",
  "workspace",
  "zed_actions",
+ "zeroize",
  "zlog",
  "ztracing",
 ]
