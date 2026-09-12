@@ -104,7 +104,11 @@ use crate::onboarding_modal::ZedPredictModal;
 use crate::prediction::EditPredictionResult;
 pub use crate::prediction::{EditPrediction, EditPredictionId, EditPredictionInputs};
 pub use language_model::ApiKeyState;
-pub use telemetry_events::EditPredictionRating;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+pub enum EditPredictionRating {
+    Positive,
+    Negative,
+}
 pub use zed_edit_prediction_delegate::ZedEditPredictionDelegate;
 
 actions!(

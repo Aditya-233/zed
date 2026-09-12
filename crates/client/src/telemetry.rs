@@ -19,7 +19,76 @@ use std::io::Write;
 use std::sync::LazyLock;
 use std::time::Instant;
 use std::{env, mem, path::PathBuf, sync::Arc, time::Duration};
-use telemetry_events::{AssistantEventData, AssistantPhase, Event, EventRequestBody, EventWrapper};
+use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct EventRequestBody {
+    pub system_id: Option<String>,
+    pub installation_id: Option<String>,
+    pub session_id: Option<String>,
+    pub metrics_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_staff: Option<bool>,
+    pub app_version: String,
+    pub os_name: String,
+    pub os_version: Option<String>,
+    pub architecture: String,
+    pub release_channel: Option<String>,
+    pub events: Vec<EventWrapper>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct EventWrapper {
+    pub signed_in: bool,
+    pub milliseconds_since_first_event: i64,
+    #[serde(flatten)]
+    pub event: Event,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantKind {
+    Panel,
+    Inline,
+    InlineTerminal,
+}
+
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantPhase {
+    #[default]
+    Response,
+    Invoked,
+    Accepted,
+    Rejected,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum Event {
+    Flexible(FlexibleEvent),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FlexibleEvent {
+    pub event_type: String,
+    pub event_properties: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AssistantEventData {
+    pub conversation_id: Option<String>,
+    pub message_id: Option<String>,
+    pub kind: AssistantKind,
+    #[serde(default)]
+    pub phase: AssistantPhase,
+    pub model: String,
+    pub model_provider: String,
+    pub response_latency: Option<Duration>,
+    pub error_message: Option<String>,
+    pub language_name: Option<String>,
+}
 
 pub struct TelemetrySubscription {
     pub historical_events: Result<HistoricalEvents>,
@@ -525,7 +594,7 @@ impl Telemetry {
     ) -> Result<()> {
         // The remote server forwards a bare `telemetry_events::FlexibleEvent`
         // (the type behind `telemetry::event!`), not the tagged `Event` enum.
-        let mut flexible: telemetry_events::FlexibleEvent =
+        let mut flexible: FlexibleEvent =
             serde_json::from_str(event_json).context("invalid remote telemetry event")?;
         flexible
             .event_properties
@@ -551,7 +620,7 @@ impl Telemetry {
     /// Returns a snapshot of the currently queued (not-yet-flushed) telemetry
     /// events, for use in tests.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn queued_events(self: &Arc<Self>) -> Vec<telemetry_events::FlexibleEvent> {
+    pub fn queued_events(self: &Arc<Self>) -> Vec<FlexibleEvent> {
         self.state
             .lock()
             .events_queue
@@ -658,61 +727,14 @@ impl Telemetry {
     }
 
     pub async fn flush_events_inner(self: &Arc<Self>) -> Result<()> {
-        let (json_bytes, request_body) = {
-            let mut state = self.state.lock();
-            state.first_event_date_time = None;
-            let events = mem::take(&mut state.events_queue);
-            state.flush_events_task.take();
-            if events.is_empty() {
-                return Ok(());
-            }
-
-            let mut json_bytes = Vec::new();
-
-            if let Some(file) = &mut state.log_file {
-                for event in &events {
-                    json_bytes.clear();
-                    serde_json::to_writer(&mut json_bytes, event)?;
-                    file.write_all(&json_bytes)?;
-                    file.write_all(b"\n")?;
-                }
-            }
-
-            (
-                json_bytes,
-                EventRequestBody {
-                    system_id: state.system_id.as_deref().map(Into::into),
-                    installation_id: state.installation_id.as_deref().map(Into::into),
-                    session_id: state.session_id.clone(),
-                    metrics_id: state.metrics_id.as_deref().map(Into::into),
-                    is_staff: state.is_staff,
-                    app_version: state.app_version.clone(),
-                    os_name: state.os_name.clone(),
-                    os_version: state.os_version.clone(),
-                    architecture: state.architecture.to_string(),
-
-                    release_channel: state
-                        .release_channel
-                        .map(|channel| channel.display_name().to_owned()),
-                    events,
-                },
-            )
-        };
-
-        let request = self.build_request(json_bytes, &request_body)?;
-        let response = self.http_client.send(request).await?;
-        if response.status() != 200 {
-            log::error!("Failed to send events: HTTP {:?}", response.status());
-        }
-
+        let mut state = self.state.lock();
+        state.events_queue.clear();
+        state.flush_events_task.take();
         anyhow::Ok(())
     }
 
     pub fn flush_events(self: &Arc<Self>) -> Task<()> {
-        let this = self.clone();
-        self.executor.spawn(async move {
-            this.flush_events_inner().await.log_err();
-        })
+        Task::ready(())
     }
 }
 
@@ -740,7 +762,7 @@ mod tests {
     use gpui::TestAppContext;
     use http_client::FakeHttpClient;
     use std::collections::HashMap;
-    use telemetry_events::FlexibleEvent;
+    use super::FlexibleEvent;
     use util::rel_path::RelPath;
     use worktree::{PathChange, ProjectEntryId, WorktreeId};
 
