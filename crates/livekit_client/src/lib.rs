@@ -1,65 +1,11 @@
-use anyhow::Context as _;
 use collections::HashMap;
-use cpal::DeviceId;
+use serde::{Deserialize, Serialize};
 
 mod remote_video_track_view;
 pub use remote_video_track_view::{RemoteVideoTrackView, RemoteVideoTrackViewEvent};
-use rodio::DeviceTrait as _;
-use serde::{Deserialize, Serialize};
 
-mod record;
-pub use record::CaptureInput;
-
-#[cfg(any(
-    rust_analyzer,
-    not(any(
-        test,
-        feature = "test-support",
-        all(target_os = "windows", target_env = "gnu"),
-        target_os = "freebsd"
-    ))
-))]
-mod livekit_client;
-#[cfg(any(
-    rust_analyzer,
-    not(any(
-        test,
-        feature = "test-support",
-        all(target_os = "windows", target_env = "gnu"),
-        target_os = "freebsd"
-    ))
-))]
-pub use livekit_client::*;
-
-#[cfg(all(
-    not(rust_analyzer),
-    any(
-        test,
-        feature = "test-support",
-        all(target_os = "windows", target_env = "gnu"),
-        target_os = "freebsd"
-    )
-))]
 mod mock_client;
-#[cfg(all(
-    not(rust_analyzer),
-    any(
-        test,
-        feature = "test-support",
-        all(target_os = "windows", target_env = "gnu"),
-        target_os = "freebsd"
-    )
-))]
 pub mod test;
-#[cfg(all(
-    not(rust_analyzer),
-    any(
-        test,
-        feature = "test-support",
-        all(target_os = "windows", target_env = "gnu"),
-        target_os = "freebsd"
-    )
-))]
 pub use mock_client::*;
 
 #[derive(Debug, Clone)]
@@ -210,54 +156,4 @@ pub enum RoomEvent {
     },
     Reconnecting,
     Reconnected,
-}
-
-pub(crate) fn default_device(
-    input: bool,
-    device_id: Option<&DeviceId>,
-) -> anyhow::Result<(cpal::Device, cpal::SupportedStreamConfig)> {
-    let device = audio::resolve_device(device_id, input)?;
-    let config = if input {
-        device
-            .default_input_config()
-            .context("failed to get default input config")?
-    } else {
-        device
-            .default_output_config()
-            .context("failed to get default output config")?
-    };
-    Ok((device, config))
-}
-
-pub(crate) fn get_sample_data(
-    sample_format: cpal::SampleFormat,
-    data: &cpal::Data,
-) -> anyhow::Result<Vec<i16>> {
-    match sample_format {
-        cpal::SampleFormat::I8 => Ok(convert_sample_data::<i8, i16>(data)),
-        cpal::SampleFormat::I16 => Ok(data.as_slice::<i16>().unwrap().to_vec()),
-        cpal::SampleFormat::I24 => Ok(convert_sample_data::<cpal::I24, i16>(data)),
-        cpal::SampleFormat::I32 => Ok(convert_sample_data::<i32, i16>(data)),
-        cpal::SampleFormat::I64 => Ok(convert_sample_data::<i64, i16>(data)),
-        cpal::SampleFormat::U8 => Ok(convert_sample_data::<u8, i16>(data)),
-        cpal::SampleFormat::U16 => Ok(convert_sample_data::<u16, i16>(data)),
-        cpal::SampleFormat::U32 => Ok(convert_sample_data::<u32, i16>(data)),
-        cpal::SampleFormat::U64 => Ok(convert_sample_data::<u64, i16>(data)),
-        cpal::SampleFormat::F32 => Ok(convert_sample_data::<f32, i16>(data)),
-        cpal::SampleFormat::F64 => Ok(convert_sample_data::<f64, i16>(data)),
-        _ => anyhow::bail!("Unsupported sample format"),
-    }
-}
-
-pub(crate) fn convert_sample_data<
-    TSource: cpal::SizedSample,
-    TDest: cpal::SizedSample + cpal::FromSample<TSource>,
->(
-    data: &cpal::Data,
-) -> Vec<TDest> {
-    data.as_slice::<TSource>()
-        .unwrap()
-        .iter()
-        .map(|e| e.to_sample::<TDest>())
-        .collect()
 }

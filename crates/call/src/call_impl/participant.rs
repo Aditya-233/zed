@@ -1,12 +1,12 @@
 use client::{ParticipantIndex, User, proto};
 use collections::HashMap;
 use gpui::WeakEntity;
-use livekit_client::AudioStream;
+use super::mock_livekit::AudioStream;
 use project::Project;
 use std::sync::Arc;
 
-pub use livekit_client::TrackSid;
-pub use livekit_client::{RemoteAudioTrack, RemoteVideoTrack};
+pub use super::mock_livekit::TrackSid;
+pub use super::mock_livekit::{RemoteAudioTrack, RemoteVideoTrack};
 
 #[derive(Clone, Default)]
 pub struct LocalParticipant {

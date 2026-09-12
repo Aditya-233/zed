@@ -17,7 +17,6 @@ test-support = [
     "client/test-support",
     "collections/test-support",
     "gpui/test-support",
-    "livekit_client/test-support",
     "project/test-support",
     "util/test-support",
     "workspace/test-support"
@@ -25,16 +24,14 @@ test-support = [
 
 [dependencies]
 anyhow.workspace = true
-audio.workspace = true
 client.workspace = true
 collections.workspace = true
 fs.workspace = true
 futures.workspace = true
 feature_flags.workspace = true
-gpui = { workspace = true, features = ["screen-capture"] }
+gpui.workspace = true
 gpui_tokio.workspace = true
 language.workspace = true
-livekit_client.workspace = true
 log.workspace = true
 postage.workspace = true
 project.workspace = true
@@ -54,5 +51,3 @@ project = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
 util = { workspace = true, features = ["test-support"] }
 workspace = { workspace = true, features = ["test-support"] }
-
-livekit_client = { workspace = true, features = ["test-support"] }

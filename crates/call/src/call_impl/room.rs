@@ -3,7 +3,11 @@ use crate::{
     participant::{LocalParticipant, RemoteParticipant},
 };
 use anyhow::{Context as _, Result, anyhow};
-use audio::{Audio, Sound};
+use super::mock_audio::{Audio, Sound};
+use super::mock_livekit::{
+    self as livekit, AudioStream, LocalTrackPublication, ParticipantIdentity, RemoteTrack,
+    RoomEvent, TrackSid,
+};
 use client::{
     ChannelId, Client, ParticipantIndex, TypedEnvelope, User, UserStore,
     proto::{self, PeerId},
@@ -18,8 +22,6 @@ use gpui::{
 };
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
-use livekit::{LocalTrackPublication, ParticipantIdentity, RoomEvent};
-use livekit_client::{self as livekit, AudioStream, TrackSid};
 use postage::{sink::Sink, stream::Stream, watch};
 use project::{CURRENT_PROJECT_FEATURES, Project};
 use settings::Settings as _;
@@ -1025,7 +1027,7 @@ impl Room {
                     publication.set_enabled(false, cx);
                 }
                 match track {
-                    livekit_client::RemoteTrack::Audio(track) => {
+                    RemoteTrack::Audio(track) => {
                         cx.emit(Event::RemoteAudioTracksChanged {
                             participant_id: participant.peer_id,
                         });
@@ -1035,7 +1037,7 @@ impl Room {
                             participant.muted = publication.is_muted();
                         }
                     }
-                    livekit_client::RemoteTrack::Video(track) => {
+                    RemoteTrack::Video(track) => {
                         cx.emit(Event::RemoteVideoTracksChanged {
                             participant_id: participant.peer_id,
                         });
@@ -1058,14 +1060,14 @@ impl Room {
                             )
                         })?;
                 match track {
-                    livekit_client::RemoteTrack::Audio(track) => {
+                    RemoteTrack::Audio(track) => {
                         participant.audio_tracks.remove(&track.sid());
                         participant.muted = true;
                         cx.emit(Event::RemoteAudioTracksChanged {
                             participant_id: participant.peer_id,
                         });
                     }
-                    livekit_client::RemoteTrack::Video(track) => {
+                    RemoteTrack::Video(track) => {
                         participant.video_tracks.remove(&track.sid());
                         cx.emit(Event::RemoteVideoTracksChanged {
                             participant_id: participant.peer_id,

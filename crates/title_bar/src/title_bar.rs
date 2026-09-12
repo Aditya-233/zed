@@ -458,7 +458,7 @@ impl TitleBar {
         let git_store = project.read(cx).git_store().clone();
         let user_store = workspace.app_state().user_store.clone();
         let client = workspace.app_state().client.clone();
-        let active_call = ActiveCall::global(cx);
+        let active_call = ActiveCall::try_global(cx);
 
         let platform_style = PlatformStyle::platform();
         let application_menu = match platform_style {
@@ -481,7 +481,9 @@ impl TitleBar {
             }),
         );
 
-        subscriptions.push(cx.observe(&active_call, |this, _, cx| this.active_call_changed(cx)));
+        if let Some(active_call) = &active_call {
+            subscriptions.push(cx.observe(active_call, |this, _, cx| this.active_call_changed(cx)));
+        }
         subscriptions.push(
             cx.subscribe(&git_store, move |_, _, event, cx| match event {
                 GitStoreEvent::ActiveRepositoryChanged(_)
@@ -1131,19 +1133,21 @@ impl TitleBar {
     }
 
     fn share_project(&mut self, cx: &mut Context<Self>) {
-        let active_call = ActiveCall::global(cx);
-        let project = self.project.clone();
-        active_call
-            .update(cx, |call, cx| call.share_project(project, cx))
-            .detach_and_log_err(cx);
+        if let Some(active_call) = ActiveCall::try_global(cx) {
+            let project = self.project.clone();
+            active_call
+                .update(cx, |call, cx| call.share_project(project, cx))
+                .detach_and_log_err(cx);
+        }
     }
 
     fn unshare_project(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        let active_call = ActiveCall::global(cx);
-        let project = self.project.clone();
-        active_call
-            .update(cx, |call, cx| call.unshare_project(project, cx))
-            .log_err();
+        if let Some(active_call) = ActiveCall::try_global(cx) {
+            let project = self.project.clone();
+            active_call
+                .update(cx, |call, cx| call.unshare_project(project, cx))
+                .log_err();
+        }
     }
 
     fn render_connection_status(

@@ -1,15 +1,20 @@
 pub mod diagnostics;
+pub mod mock_audio;
+pub mod mock_livekit;
 pub mod participant;
 pub mod room;
 
 use anyhow::{Context as _, Result, anyhow};
-use audio::Audio;
 use client::{ChannelId, Client, TypedEnvelope, User, UserStore, ZED_ALWAYS_ACTIVE, proto};
 use collections::HashSet;
 use futures::{Future, FutureExt, channel::oneshot, future::Shared};
 use gpui::{
     AnyView, App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Subscription, Task,
     TaskExt, WeakEntity, Window,
+};
+pub use mock_audio::{Audio, Sound};
+pub use mock_livekit::{
+    ConnectionQuality, RemoteVideoTrack, RemoteVideoTrackView, RemoteVideoTrackViewEvent,
 };
 use postage::watch;
 use project::Project;
@@ -21,7 +26,6 @@ use workspace::{
     RemoteCollaborator, SharedScreen, Workspace,
 };
 
-pub use livekit_client::{RemoteVideoTrack, RemoteVideoTrackView, RemoteVideoTrackViewEvent};
 pub use room::Room;
 
 use crate::call_settings::CallSettings;

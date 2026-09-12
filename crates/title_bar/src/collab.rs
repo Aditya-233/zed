@@ -10,7 +10,7 @@ use gpui::{
 };
 use gpui::{App, Task, Window};
 use icons::IconName;
-use livekit_client::ConnectionQuality;
+use call::ConnectionQuality;
 use project::WorktreeSettings;
 use remote_connection::RemoteConnectionModal;
 use rpc::proto::{self};
@@ -39,7 +39,10 @@ pub fn toggle_screen_sharing(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let call = ActiveCall::global(cx).read(cx);
+    let Some(call_entity) = ActiveCall::try_global(cx) else {
+        return;
+    };
+    let call = call_entity.read(cx);
     let toggle_screen_sharing = match screen {
         Ok(screen) => {
             let Some(room) = call.room().cloned() else {
@@ -91,7 +94,10 @@ pub fn toggle_screen_sharing(
 }
 
 pub fn toggle_mute(cx: &mut App) {
-    let call = ActiveCall::global(cx).read(cx);
+    let Some(call_entity) = ActiveCall::try_global(cx) else {
+        return;
+    };
+    let call = call_entity.read(cx);
     if let Some(room) = call.room().cloned() {
         room.update(cx, |room, cx| {
             let operation = if room.is_muted() {
@@ -338,7 +344,7 @@ impl TitleBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(room) = ActiveCall::global(cx).read(cx).room().cloned() else {
+        let Some(room) = ActiveCall::try_global(cx).and_then(|call| call.read(cx).room().cloned()) else {
             return Empty.into_any_element();
         };
 
@@ -399,9 +405,10 @@ impl TitleBar {
                             .tooltip(Tooltip::text("Leave Call"))
                             .icon_size(IconSize::Small)
                             .on_click(move |_, _window, cx| {
-                                ActiveCall::global(cx)
-                                    .update(cx, |call, cx| call.hang_up(cx))
-                                    .detach_and_log_err(cx);
+                                if let Some(call) = ActiveCall::try_global(cx) {
+                                    call.update(cx, |call, cx| call.hang_up(cx))
+                                        .detach_and_log_err(cx);
+                                }
                             }),
                     )
                     .child(Divider::vertical().color(DividerColor::Border)),
