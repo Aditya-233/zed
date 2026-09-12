@@ -29,13 +29,12 @@ use workspace::item::ItemBufferKind;
 use workspace::{
     ToolbarItemEvent, ToolbarItemLocation, ToolbarItemView, Workspace, item::ItemHandle,
 };
-use zed_actions::{agent::AddSelectionToThread, assistant::InlineAssist, outline::ToggleOutline};
+use zed_actions::{agent::AddSelectionToThread, outline::ToggleOutline};
 
 const MAX_CODE_ACTION_MENU_LINES: u32 = 16;
 
 pub struct QuickActionBar {
     _inlay_hints_enabled_subscription: Option<Subscription>,
-    _ai_settings_subscription: Subscription,
     active_item: Option<Box<dyn ItemHandle>>,
     buffer_search_bar: Entity<BufferSearchBar>,
     show: bool,
@@ -52,7 +51,6 @@ impl QuickActionBar {
     ) -> Self {
         let mut this = Self {
             _inlay_hints_enabled_subscription: None,
-            _ai_settings_subscription: None,
             active_item: None,
             buffer_search_bar,
             show: true,
