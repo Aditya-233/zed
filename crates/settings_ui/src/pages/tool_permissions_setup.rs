@@ -12,7 +12,7 @@ impl ToolPermissionDecision {
         permissions: &agent_settings::ToolPermissions,
         _shell_kind: ShellKind,
     ) -> Self {
-        match permissions.tools.get(tool_id).map(|r| r.default).unwrap_or(permissions.default) {
+        match permissions.tools.get(tool_id).and_then(|r| r.default).unwrap_or(permissions.default) {
             ToolPermissionMode::Allow => ToolPermissionDecision::Allow,
             ToolPermissionMode::Deny => ToolPermissionDecision::Deny("Permission denied".into()),
             ToolPermissionMode::Confirm => ToolPermissionDecision::Confirm,
