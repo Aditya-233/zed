@@ -8,7 +8,7 @@ use gpui::{
     ClipboardItem, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, FontWeight, Render,
     Subscription, Task, TaskExt as _, Window,
 };
-use livekit_client::ConnectionQuality;
+use call::ConnectionQuality;
 use release_channel::{AppVersion, ReleaseChannel};
 use serde::Serialize;
 use std::{cmp::Reverse, path::PathBuf};

@@ -2,27 +2,6 @@
 use std::process::Command;
 
 fn main() {
-    #[cfg(target_os = "linux")]
-    {
-        // Add rpaths for libraries that webrtc-sys dlopens at runtime.
-        // This is mostly required for hosts with non-standard SO installation
-        // locations such as NixOS.
-        let dlopened_libs = ["libva", "libva-drm", "egl"];
-
-        let mut rpath_dirs = std::collections::BTreeSet::new();
-        for lib in &dlopened_libs {
-            if let Some(libdir) = pkg_config::get_variable(lib, "libdir").ok() {
-                rpath_dirs.insert(libdir);
-            } else {
-                eprintln!("zed build.rs: {lib} not found in pkg-config's path");
-            }
-        }
-
-        for dir in &rpath_dirs {
-            println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
-        }
-    }
-
     if cfg!(target_os = "macos") {
         println!("cargo:rustc-env=MACOSX_DEPLOYMENT_TARGET=10.15.7");
 
@@ -200,11 +179,6 @@ fn main() {
 
         println!("cargo:rerun-if-env-changed=RELEASE_CHANNEL");
         println!("cargo:rerun-if-env-changed=GITHUB_RUN_NUMBER");
-
-        #[cfg(windows)]
-        {
-            windows_resources::compile(false).expect("failed to compile Windows resources");
-        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -224,11 +198,7 @@ fn icon_path() -> std::path::PathBuf {
         _ => "-dev",
     };
 
-    #[cfg(windows)]
-    let icon = format!("resources/windows/app-icon{}.ico", channel);
-    #[cfg(not(windows))]
     let icon = format!("resources/app-icon{}.png", channel);
-
     std::path::PathBuf::from_str(&icon).unwrap()
 }
 

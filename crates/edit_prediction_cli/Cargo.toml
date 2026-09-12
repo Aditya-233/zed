@@ -25,7 +25,6 @@ client.workspace = true
 cloud_llm_client = { workspace = true, features = ["predict-edits"] }
 collections.workspace = true
 db.workspace = true
-debug_adapter_extension.workspace = true
 dirs.workspace = true
 extension.workspace = true
 fs.workspace = true
@@ -63,7 +62,6 @@ watch.workspace = true
 edit_prediction = { workspace = true, features = ["cli-support"] }
 edit_prediction_context.workspace = true
 edit_prediction_metrics = { workspace = true, features = ["tree-sitter"] }
-telemetry_events.workspace = true
 wasmtime.workspace = true
 zeta_prompt.workspace = true
 rand.workspace = true

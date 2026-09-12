@@ -603,7 +603,7 @@ struct ManagedNodeRuntime {
 }
 
 impl ManagedNodeRuntime {
-    const VERSION: &str = "v24.11.0";
+    const VERSION: &str = "v24.21.0";
 
     #[cfg(not(windows))]
     const NODE_PATH: &str = "bin/node";
@@ -894,8 +894,18 @@ impl SystemNodeRuntime {
     }
 
     async fn detect() -> std::result::Result<Self, DetectError> {
-        let node = which::which("node").map_err(DetectError::NotInPath)?;
-        let npm = which::which("npm").map_err(DetectError::NotInPath)?;
+        let node = which::which("node")
+            .or_else(|_| {
+                let p = PathBuf::from("/usr/bin/node");
+                if p.is_file() { Ok(p) } else { Err(which::Error::CannotFindBinaryPath) }
+            })
+            .map_err(DetectError::NotInPath)?;
+        let npm = which::which("npm")
+            .or_else(|_| {
+                let p = PathBuf::from("/usr/bin/npm");
+                if p.is_file() { Ok(p) } else { Err(which::Error::CannotFindBinaryPath) }
+            })
+            .map_err(DetectError::NotInPath)?;
         Self::new(node, npm).await.map_err(DetectError::Other)
     }
 }

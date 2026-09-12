@@ -57,32 +57,29 @@ commit=$(git rev-parse HEAD | cut -c 1-7)
 version_info=$(rustc --version --verbose)
 host_line=$(echo "$version_info" | grep host)
 target_triple=${host_line#*: }
-musl_triple=${target_triple%-gnu}-musl
-remote_server_triple=${REMOTE_SERVER_TARGET:-"${musl_triple}"}
-rustup_installed=false
-if command -v rustup >/dev/null 2>&1; then
-    rustup_installed=true
-fi
 
 # Generate the licenses first, so they can be baked into the binaries
 script/generate-licenses
 
-if "$rustup_installed" && [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    rustup target add "$remote_server_triple"
-fi
-
 export CC=${CC:-$(which clang)}
 
 # Build binary in release mode
+TARGET_CPU_FLAG="${TARGET_CPU_FLAG:--C target-cpu=raptorlake}"
+
 # Use mold if available for ultra-fast linking on Linux x86_64, or lld on aarch64.
 if command -v mold >/dev/null 2>&1; then
-    LINKER_FLAGS="-C link-arg=-fuse-ld=mold"
+    LINKER_FLAGS="-C link-arg=-fuse-ld=mold -C link-arg=-Wl,--icf=all -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,relro"
 elif [[ "$(uname -m)" == "aarch64" ]]; then
-    LINKER_FLAGS="-C link-arg=-fuse-ld=lld"
+    LINKER_FLAGS="-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--icf=all -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,relro"
 else
     LINKER_FLAGS=""
 fi
-export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+
+if command -v sccache >/dev/null 2>&1; then
+    export RUSTC_WRAPPER="$(command -v sccache)"
+    export CARGO_BUILD_RUSTC_WRAPPER="$(command -v sccache)"
+fi
+export RUSTFLAGS="${RUSTFLAGS:-} ${TARGET_CPU_FLAG} ${LINKER_FLAGS} -Z share-generics=y -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--as-needed -C link-arg=-Wl,--disable-new-dtags -C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
 cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli --timings
 
 # Print crate compilation timing summary
@@ -117,70 +114,13 @@ if timing_files:
         print(f"Notice: Could not parse timing summary: {e}")
 PY_EOF
 
-
-# Build remote_server only when explicitly enabled (saves ~22 minutes in CI)
-if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    if [[ "$remote_server_triple" == "$musl_triple" ]]; then
-        export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
-        musl_cc_var="CC_$(echo "$remote_server_triple" | tr '-' '_')"
-        export "$musl_cc_var"=musl-gcc
-    fi
-    cargo --config .cargo/bundle-config.toml build --release --target "${remote_server_triple}" --package remote_server
-fi
-
-# Upload debug info to sentry.io
-if ! command -v sentry-cli >/dev/null 2>&1; then
-    echo "sentry-cli not found. skipping sentry upload."
-    echo "install with: 'curl -sL https://sentry.io/get-cli | bash'"
-else
-    if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
-        echo "Uploading zed debug symbols to sentry..."
-        sentry_binaries=("${target_dir}/${target_triple}/release/zed")
-        if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-            sentry_binaries+=("${target_dir}/${remote_server_triple}/release/remote_server")
-        fi
-        # note: this uploads the unstripped binary which is needed because it contains
-        # .eh_frame data for stack unwinding. see https://github.com/getsentry/symbolic/issues/783
-        for attempt in 1 2 3; do
-            echo "Attempting sentry upload (attempt $attempt/3)..."
-            if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev "${sentry_binaries[@]}"; then
-                echo "Sentry upload successful on attempt $attempt"
-                break
-            else
-                echo "Sentry upload failed on attempt $attempt"
-                if [ $attempt -eq 3 ]; then
-                    echo "All sentry upload attempts failed"
-                fi
-            fi
-        done
-    else
-        echo "missing SENTRY_AUTH_TOKEN. skipping sentry upload."
-    fi
-fi
-
 # Split debug symbols into local .dbg files, then strip debug info and local
-# symbols from the shipped binaries. Sentry receives the full unstripped
-# binaries above; the .dbg files keep symbols recoverable when that upload
-# is skipped.
+# symbols from the shipped binaries.
 # We use llvm-objcopy because GNU objcopy on older distros (e.g. Ubuntu 20.04)
 # doesn't understand CREL sections produced by newer LLVM.
 llvm-objcopy --only-keep-debug "${target_dir}/${target_triple}/release/zed" "${target_dir}/${target_triple}/release/zed.dbg"
 llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/zed"
 llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/cli"
-
-if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    llvm-objcopy --only-keep-debug "${target_dir}/${remote_server_triple}/release/remote_server" "${target_dir}/${remote_server_triple}/release/remote_server.dbg"
-    llvm-objcopy --strip-debug --discard-all "${target_dir}/${remote_server_triple}/release/remote_server"
-
-    # Ensure that remote_server does not depend on libssl nor libcrypto, as we got rid of these deps.
-    if ldd "${target_dir}/${remote_server_triple}/release/remote_server" | grep -q 'libcrypto\|libssl'; then
-        if [[ "$remote_server_triple" == *-musl ]]; then
-            echo "Error: remote_server still depends on libssl or libcrypto" && exit 1
-        else
-            echo "Info: Using non-musl remote-server build."
-        fi
-    fi
-fi
 
 suffix=""
 if [ "$channel" != "stable" ]; then
@@ -207,13 +147,16 @@ cp "${target_dir}/${target_triple}/release/cli" "${zed_dir}/bin/zeditor"
 find_libs() {
     ldd ${target_dir}/${target_triple}/release/zed |\
         cut -d' ' -f3 |\
-        grep -v '\<\(libc.so\|libgcc_s.so\|libm.so\|libpthread.so\|libdl.so\|libasound.so\)' |\
+        grep -v '\<\(libc.so\|libgcc_s.so\|libm.so\|libpthread.so\|libdl.so\|libasound.so\|libstdc++.so\)' |\
         grep -v '\<\(libglib-2.0.so\|libgobject-2.0.so\|libgio-2.0.so\|libgmodule-2.0.so\|libpcre.so\|libpcre2-8.so\|libmount.so\|libblkid.so\|libselinux.so\|libffi.so\|libresolv.so\|libz.so\)'
 }
 
 mkdir -p "${zed_dir}/lib"
 rm -rf "${zed_dir}/lib/*"
-cp $(find_libs) "${zed_dir}/lib"
+bundled_libs=$(find_libs || true)
+if [[ -n "${bundled_libs}" ]]; then
+    cp ${bundled_libs} "${zed_dir}/lib"
+fi
 
 # Icons
 mkdir -p "${zed_dir}/share/icons/hicolor/512x512/apps"
@@ -255,7 +198,3 @@ rm -rf "${archive}"
 remove_match="zed(-[a-zA-Z0-9]+)?-linux-$(uname -m)\.tar\.gz"
 ls "${target_dir}/release" | grep -E ${remove_match} | xargs -d "\n" -I {} rm -f "${target_dir}/release/{}" || true
 tar -czvf "${target_dir}/release/$archive" -C ${temp_dir} "zed$suffix.app"
-
-if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    gzip -f --stdout --best "${target_dir}/${remote_server_triple}/release/remote_server" > "${target_dir}/zed-remote-server-linux-${arch}.gz"
-fi

@@ -13,6 +13,7 @@ permissions:
 env:
   GIT_CONFIG_PARAMETERS: "'advice.defaultBranchName=false' 'init.defaultBranch=main'"
   RUSTC_WRAPPER: sccache
+  CARGO_BUILD_RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
@@ -26,7 +27,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup sccache
-        uses: mozilla/sccache-action@v0.0.9
+        uses: mozilla/sccache-action@v0.0.11
         with:
           version: "v0.10.0"
 

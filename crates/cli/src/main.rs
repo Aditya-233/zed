@@ -48,21 +48,21 @@ trait InstalledApp {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "zed",
+    name = "zeditor",
     disable_version_flag = true,
-    before_help = "The Zed CLI binary.
+    before_help = "The Zeditor CLI binary.
 This CLI is a separate binary that invokes Zed.
 
 Examples:
-    `zed`
+    `zeditor`
           Simply opens Zed
-    `zed --foreground`
+    `zeditor --foreground`
           Runs in foreground (shows all logs)
-    `zed path-to-your-project`
+    `zeditor path-to-your-project`
           Open your project in Zed
-    `zed -n path-to-file `
+    `zeditor -n path-to-file`
           Open file/folder in a new window",
-    after_help = "To read from stdin, append '-', e.g. 'ps axf | zed -'"
+    after_help = "To read from stdin, append '-', e.g. 'ps axf | zeditor -'"
 )]
 struct Args {
     /// Wait for all of the given paths to be opened/closed before exiting.
@@ -79,7 +79,7 @@ struct Args {
     /// Reuse an existing window, replacing its workspace
     #[arg(short, long, overrides_with_all = ["add", "new", "existing", "classic"], hide = true)]
     reuse: bool,
-    /// Open in existing Zed window
+    /// Open in existing window
     #[arg(short = 'e', long = "existing", overrides_with_all = ["add", "new", "reuse", "classic"])]
     existing: bool,
     /// Use the classic open behavior: new window for directories, reuse for files
@@ -95,21 +95,21 @@ struct Args {
     )]
     #[arg(long, value_name = "DIR", value_hint = clap::ValueHint::DirPath)]
     user_data_dir: Option<String>,
-    /// The paths to open in Zed (space-separated).
+    /// The paths to open (space-separated).
     ///
     /// Use `path:line:column` syntax to open a file at the given line and column.
     #[arg(trailing_var_arg = true, value_hint = clap::ValueHint::AnyPath)]
     paths_with_position: Vec<String>,
-    /// Print Zed's version and the app path.
+    /// Print version and the app path.
     #[arg(short, long)]
     version: bool,
-    /// Run zed in the foreground (useful for debugging)
+    /// Run in the foreground (useful for debugging and showing all logs)
     #[arg(long)]
     foreground: bool,
-    /// Custom path to Zed.app or the zed binary
+    /// Custom path to the zed-editor binary
     #[arg(long)]
     zed: Option<PathBuf>,
-    /// Run zed in dev-server mode
+    /// Run in dev-server mode
     #[arg(long)]
     dev_server_token: Option<String>,
     /// The username and WSL distribution to use when opening paths. If not specified,
@@ -124,24 +124,21 @@ struct Args {
     #[cfg(target_os = "windows")]
     #[arg(long, value_name = "USER@DISTRO")]
     wsl: Option<String>,
-    /// Not supported in Zed CLI, only supported on Zed binary
+    /// Not supported in zeditor CLI, only supported on zed-editor binary
     /// Will attempt to give the correct command to run
     #[arg(long)]
     system_specs: bool,
     /// Open the project in a dev container.
-    ///
-    /// Automatically triggers "Reopen in Dev Container" if a `.devcontainer/`
-    /// configuration is found in the project directory.
-    #[arg(long)]
+    #[arg(long, hide = true)]
     dev_container: bool,
     /// Pairs of file paths to diff. Can be specified multiple times.
     /// When directories are provided, recurses into them and shows all changed files in a single multi-diff view.
     #[arg(long, action = clap::ArgAction::Append, num_args = 2, value_names = ["OLD_PATH", "NEW_PATH"], value_hint = clap::ValueHint::AnyPath)]
     diff: Vec<String>,
-    /// Generate shell completions for Zed
+    /// Generate shell completions for Zeditor
     #[arg(long, value_names = ["SHELL"])]
     completions: Option<Shell>,
-    /// Uninstall Zed from user system
+    /// Uninstall Zeditor from user system
     #[cfg(all(
         any(target_os = "linux", target_os = "macos"),
         not(feature = "no-bundled-uninstall")
@@ -150,7 +147,7 @@ struct Args {
     uninstall: bool,
 
     /// Used for SSH/Git password authentication, to remove the need for netcat as a dependency,
-    /// by having Zed act like netcat communicating over a Unix socket.
+    /// by having Zeditor act like netcat communicating over a Unix socket.
     #[arg(long, hide = true)]
     askpass: Option<String>,
 }
