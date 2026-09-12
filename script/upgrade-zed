@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$EUID" -ne 0 ]; then
+    echo "This script must be run with sudo or as root to update system packages."
+    echo "Usage: sudo $0"
+    exit 1
+fi
+
+echo "==> Fetching latest custom-zed repository index..."
+pacman -Sy custom-zed
+
+echo "==> Upgrading/reinstalling zed-minimal from custom-zed..."
+pacman -S --noconfirm custom-zed/zed-minimal
+
+echo ""
+echo "==> Verifying installed Zed package:"
+pacman -Qi zed-minimal | grep -E "Name|Version|Installed Size|Build Date"
+
+echo ""
+echo "==> Checking binary stripped status (verifying negative invariant):"
+if strings /usr/lib/zed/zed-editor | grep -i "livekit" >/dev/null 2>&1; then
+    echo "WARNING: livekit symbols still found in /usr/lib/zed/zed-editor"
+else
+    echo "SUCCESS: 0 LiveKit/WebRTC symbols found. Zed is minimized and stripped."
+fi

@@ -11,7 +11,7 @@ else
     version="$(cargo metadata --no-deps --format-version=1 2>/dev/null | python3 -c 'import sys, json; data=json.load(sys.stdin); print(next(p["version"] for p in data["packages"] if p["name"] == "zed"))' 2>/dev/null || grep -m1 '^version = ' Cargo.toml | cut -d'\"' -f2)"
 fi
 pkgver="${version}"
-pkgrel="4"
+pkgrel="${GITHUB_RUN_NUMBER:-5}"
 arch="x86_64"
 repo_name="custom-zed"
 
