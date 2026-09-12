@@ -4021,6 +4021,7 @@ async fn test_remote_agent_fs_tool_calls(cx: &mut TestAppContext, server_cx: &mu
     does_not_exist_result.await.unwrap_err();
 }
 
+#[cfg(feature = "acp-tests")]
 #[gpui::test]
 async fn test_adding_remote_skill(cx: &mut TestAppContext, server_cx: &mut TestAppContext) {
     use acp_thread::AgentConnection as _;

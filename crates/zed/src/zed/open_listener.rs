@@ -1,6 +1,23 @@
 use crate::handle_open_request;
 use crate::restore_or_create_workspace;
-use agent_ui::ExternalSourcePrompt;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalSourcePrompt(String);
+
+impl ExternalSourcePrompt {
+    pub fn new(prompt: &str) -> Option<Self> {
+        let trimmed = prompt.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(Self(trimmed.to_string()))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 use anyhow::{Context as _, Result, anyhow};
 use cli::{CliRequest, CliResponse, CliResponseSink};
 use cli::{IpcHandshake, ipc};

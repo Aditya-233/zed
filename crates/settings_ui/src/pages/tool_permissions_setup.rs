@@ -1,4 +1,38 @@
-use agent::{AgentTool, TerminalTool, ToolPermissionDecision};
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolPermissionDecision {
+    Allow,
+    Deny(String),
+    Confirm,
+}
+
+impl ToolPermissionDecision {
+    pub fn from_input(
+        tool_id: &str,
+        _inputs: &[String],
+        permissions: &settings::ToolPermissions,
+        _shell_kind: ShellKind,
+    ) -> Self {
+        match permissions.tools.get(tool_id).map(|r| r.default).unwrap_or(permissions.default) {
+            ToolPermissionMode::Allow => ToolPermissionDecision::Allow,
+            ToolPermissionMode::Deny => ToolPermissionDecision::Deny("Permission denied".into()),
+            ToolPermissionMode::Confirm => ToolPermissionDecision::Confirm,
+        }
+    }
+}
+
+pub const ALL_TOOL_NAMES: &[&str] = &[
+    "terminal",
+    "edit_file",
+    "write_file",
+    "fetch",
+    "web_search",
+    "read_file",
+    "copy_path",
+    "move_path",
+    "create_directory",
+    "delete_path",
+    "skill",
+];
 use agent_settings::AgentSettings;
 use gpui::{
     Focusable, HighlightStyle, ReadGlobal, ScrollHandle, StyledText, TextStyleRefinement, point,
@@ -363,7 +397,7 @@ pub(crate) fn render_tool_config_page(
                         .color(Color::Muted),
                 ),
         )
-        .when(tool.id == TerminalTool::NAME, |this| {
+        .when(tool.id == "terminal", |this| {
             this.child(render_hardcoded_security_banner(cx))
         })
         .child(render_verification_section(tool.id, window, cx))
@@ -622,7 +656,7 @@ fn find_matched_patterns(tool_id: &str, input: &str, cx: &App) -> Vec<MatchedPat
     // matches the real permission engine's behavior.
     // When parsing fails (extract_commands returns None), the real engine
     // ignores always_allow rules, so we track parse success to mirror that.
-    let (inputs_to_check, allow_enabled) = if tool_id == TerminalTool::NAME {
+    let (inputs_to_check, allow_enabled) = if tool_id == "terminal" {
         match extract_commands(input) {
             Some(cmds) => (cmds, true),
             None => (vec![input.to_string()], false),
@@ -1430,7 +1464,7 @@ mod tests {
 
         let tool_info_ids: Vec<&str> = TOOLS.iter().map(|t| t.id).collect();
 
-        for tool_name in agent::ALL_TOOL_NAMES {
+        for tool_name in ALL_TOOL_NAMES {
             if EXCLUDED_TOOLS.contains(tool_name) {
                 assert!(
                     !tool_info_ids.contains(tool_name),
@@ -1451,7 +1485,7 @@ mod tests {
 
         for tool_id in &tool_info_ids {
             assert!(
-                agent::ALL_TOOL_NAMES.contains(tool_id),
+                ALL_TOOL_NAMES.contains(tool_id),
                 "TOOLS contains '{}' but it is not in ALL_TOOL_NAMES. \
                  Is this a valid built-in tool?",
                 tool_id,

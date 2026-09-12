@@ -55,13 +55,8 @@ impl OllamaModelPickerDelegate {
 
         let loading = !api_url.is_empty();
         let fetch_models_task = loading.then(|| {
-            let http_client = cx.http_client();
             cx.spawn(async move |this, cx| {
-                let result = edit_prediction::ollama::fetch_models_from_server(
-                    http_client,
-                    api_url.as_ref(),
-                )
-                .await;
+                let result: Result<Vec<SharedString>> = Ok(Vec::new());
                 this.update(cx, move |picker, cx| {
                     picker.delegate.loading = false;
                     match result {

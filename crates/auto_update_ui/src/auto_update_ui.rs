@@ -10,7 +10,6 @@ use gpui::{
     prelude::*,
 };
 use markdown_preview::markdown_preview_view::{MarkdownPreviewMode, MarkdownPreviewView};
-use prompt_store::rules_to_skills_migration;
 use release_channel::{AppVersion, ReleaseChannel};
 use semver::Version;
 use serde::Deserialize;
@@ -219,8 +218,7 @@ fn announcement_for_version(version: &Version, cx: &App) -> Option<AnnouncementC
         // had Rules that got migrated. New users (and existing users who
         // never created a Rule) would otherwise be confused by a bullet
         // referring to "your rules" that don't exist.
-        let migrated_anything =
-            rules_to_skills_migration::migration_result().is_some_and(|result| !result.is_empty());
+        let migrated_anything = false;
 
         let mut bullet_items: Vec<SharedString> = Vec::with_capacity(3);
         bullet_items
