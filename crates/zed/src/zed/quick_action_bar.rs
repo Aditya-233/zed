@@ -49,6 +49,7 @@ impl QuickActionBar {
         buffer_search_bar: Entity<BufferSearchBar>,
         workspace: &Workspace,
         cx: &mut Context<Self>,
+    ) -> Self {
         let mut this = Self {
             _inlay_hints_enabled_subscription: None,
             _ai_settings_subscription: None,
