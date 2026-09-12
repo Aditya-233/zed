@@ -82,7 +82,7 @@ elif [[ "$(uname -m)" == "aarch64" ]]; then
 else
     LINKER_FLAGS=""
 fi
-export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-args=-Wl,--gc-sections,-Wl,--as-needed,-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--as-needed -C link-arg=-Wl,--disable-new-dtags -C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
 cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli --timings
 
 # Print crate compilation timing summary
