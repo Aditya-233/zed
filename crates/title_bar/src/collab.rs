@@ -18,6 +18,6 @@ impl TitleBar {
         _: &mut Window,
         _cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        div().id("collaborator-list")
+        div()
     }
 }
