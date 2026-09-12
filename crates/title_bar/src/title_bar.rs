@@ -22,7 +22,6 @@ use crate::application_menu::{
 };
 
 use auto_update::AutoUpdateStatus;
-use call::ActiveCall;
 use client::{Client, UserStore, zed_urls};
 use command_palette_hooks::CommandPaletteFilter;
 
@@ -379,7 +378,6 @@ impl Render for TitleBar {
                 .pr_1()
                 .gap_1()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(self.render_call_controls(window, cx))
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
                 .when(
@@ -458,7 +456,6 @@ impl TitleBar {
         let git_store = project.read(cx).git_store().clone();
         let user_store = workspace.app_state().user_store.clone();
         let client = workspace.app_state().client.clone();
-        let active_call = ActiveCall::try_global(cx);
 
         let platform_style = PlatformStyle::platform();
         let application_menu = match platform_style {
@@ -481,9 +478,6 @@ impl TitleBar {
             }),
         );
 
-        if let Some(active_call) = &active_call {
-            subscriptions.push(cx.observe(active_call, |this, _, cx| this.active_call_changed(cx)));
-        }
         subscriptions.push(
             cx.subscribe(&git_store, move |_, _, event, cx| match event {
                 GitStoreEvent::ActiveRepositoryChanged(_)
@@ -1114,41 +1108,9 @@ impl TitleBar {
         )
     }
 
-    fn active_call_changed(&mut self, cx: &mut Context<Self>) {
-        self.observe_diagnostics(cx);
-        cx.notify();
-    }
+    fn share_project(&mut self, _cx: &mut Context<Self>) {}
 
-    fn observe_diagnostics(&mut self, cx: &mut Context<Self>) {
-        let diagnostics = ActiveCall::global(cx)
-            .read(cx)
-            .room()
-            .and_then(|room| room.read(cx).diagnostics().cloned());
-
-        if let Some(diagnostics) = diagnostics {
-            self._diagnostics_subscription = Some(cx.observe(&diagnostics, |_, _, cx| cx.notify()));
-        } else {
-            self._diagnostics_subscription = None;
-        }
-    }
-
-    fn share_project(&mut self, cx: &mut Context<Self>) {
-        if let Some(active_call) = ActiveCall::try_global(cx) {
-            let project = self.project.clone();
-            active_call
-                .update(cx, |call, cx| call.share_project(project, cx))
-                .detach_and_log_err(cx);
-        }
-    }
-
-    fn unshare_project(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(active_call) = ActiveCall::try_global(cx) {
-            let project = self.project.clone();
-            active_call
-                .update(cx, |call, cx| call.unshare_project(project, cx))
-                .log_err();
-        }
-    }
+    fn unshare_project(&mut self, _: &mut Window, _cx: &mut Context<Self>) {}
 
     fn render_connection_status(
         &self,

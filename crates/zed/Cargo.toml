@@ -84,7 +84,6 @@ assets.workspace = true
 auto_update.workspace = true
 auto_update_ui.workspace = true
 breadcrumbs.workspace = true
-call.workspace = true
 call_hierarchy.workspace = true
 channel.workspace = true
 chrono.workspace = true
@@ -93,7 +92,6 @@ cli.workspace = true
 client.workspace = true
 clock = { workspace = true, optional = true }
 codestral.workspace = true
-collab_ui.workspace = true
 collections.workspace = true
 command_palette.workspace = true
 component_preview.workspace = true
