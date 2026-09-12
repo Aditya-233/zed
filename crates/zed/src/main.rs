@@ -340,7 +340,6 @@ fn main() {
         session_id.clone(),
         KeyValueStore::from_app_db(&app_db),
     ));
-    let background_executor = app.background_executor();
 
     let (open_listener, mut open_rx) = OpenListener::new();
 
@@ -554,7 +553,6 @@ fn main() {
             session.id().to_owned(),
             cx,
         );
-        let is_new_install = matches!(&installation_id, Some(IdType::New(_)));
 
         // We should rename these in the future to `first app open`, `first app open for release channel`, and `app open`
         if let (Some(system_id), Some(installation_id)) = (&system_id, &installation_id) {

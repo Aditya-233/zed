@@ -189,7 +189,7 @@ impl OpenRequest {
                 this.kind = Some(OpenRequestKind::Extension {
                     extension_id: extension_id.to_string(),
                 });
-            } else if url.starts_with(agent_skills::SKILL_SHARE_LINK_PREFIX) {
+            } else if url.starts_with("zed://skill?data=") {
                 this.parse_skill_install_url(&url)?
             } else if let Some(agent_path) = url.strip_prefix("zed://agent") {
                 this.parse_agent_url(agent_path)
@@ -250,10 +250,8 @@ impl OpenRequest {
         });
     }
 
-    fn parse_skill_install_url(&mut self, url: &str) -> Result<()> {
-        // Format: zed://skill?data=<base64url of SKILL.md contents>
-        let content = agent_skills::decode_skill_share_link(url)?;
-        self.kind = Some(OpenRequestKind::InstallSkill { content });
+    fn parse_skill_install_url(&mut self, _url: &str) -> Result<()> {
+        log::info!("zed://skill received but skills are disabled in this minimal build");
         Ok(())
     }
 

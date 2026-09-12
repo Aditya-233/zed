@@ -112,6 +112,7 @@ pub struct Telemetry {
     state: Arc<Mutex<TelemetryState>>,
 }
 
+#[allow(dead_code)]
 struct TelemetryState {
     settings: TelemetrySettings,
     system_id: Option<Arc<str>>,       // Per system
@@ -703,6 +704,7 @@ impl Telemetry {
         self.state.lock().is_staff
     }
 
+    #[allow(dead_code)]
     fn build_request(
         self: &Arc<Self>,
         // We take in the JSON bytes buffer so we can reuse the existing allocation.
