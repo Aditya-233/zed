@@ -9,7 +9,7 @@ impl ToolPermissionDecision {
     pub fn from_input(
         tool_id: &str,
         _inputs: &[String],
-        permissions: &settings::ToolPermissions,
+        permissions: &agent_settings::ToolPermissions,
         _shell_kind: ShellKind,
     ) -> Self {
         match permissions.tools.get(tool_id).map(|r| r.default).unwrap_or(permissions.default) {

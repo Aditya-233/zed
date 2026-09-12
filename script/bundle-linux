@@ -76,13 +76,13 @@ export CC=${CC:-$(which clang)}
 # Build binary in release mode
 # Use mold if available for ultra-fast linking on Linux x86_64, or lld on aarch64.
 if command -v mold >/dev/null 2>&1; then
-    LINKER_FLAGS="-C link-arg=-fuse-ld=mold"
+    LINKER_FLAGS="-C link-arg=-fuse-ld=mold -C link-arg=-Wl,--icf=all"
 elif [[ "$(uname -m)" == "aarch64" ]]; then
-    LINKER_FLAGS="-C link-arg=-fuse-ld=lld"
+    LINKER_FLAGS="-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--icf=all"
 else
     LINKER_FLAGS=""
 fi
-export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-args=-Wl,--gc-sections,-Wl,--as-needed,-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
 cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli --timings
 
 # Print crate compilation timing summary

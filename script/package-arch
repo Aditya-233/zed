@@ -56,6 +56,8 @@ elif [[ -f "${src_app}/bin/zed" ]]; then
 fi
 chmod 755 "${pkgroot}/usr/bin/zeditor"
 rm -f "${pkgroot}/usr/bin/zed"
+strip --strip-all "${pkgroot}/usr/lib/zed/zed-editor" 2>/dev/null || true
+strip --strip-all "${pkgroot}/usr/bin/zeditor" 2>/dev/null || true
 
 # Copy bundled libs if any
 if [[ -d "${src_app}/lib" ]] && [[ "$(ls -A "${src_app}/lib" 2>/dev/null)" ]]; then
