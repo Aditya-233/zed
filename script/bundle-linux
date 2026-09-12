@@ -128,40 +128,8 @@ if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
     cargo --config .cargo/bundle-config.toml build --release --target "${remote_server_triple}" --package remote_server
 fi
 
-# Upload debug info to sentry.io
-if ! command -v sentry-cli >/dev/null 2>&1; then
-    echo "sentry-cli not found. skipping sentry upload."
-    echo "install with: 'curl -sL https://sentry.io/get-cli | bash'"
-else
-    if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
-        echo "Uploading zed debug symbols to sentry..."
-        sentry_binaries=("${target_dir}/${target_triple}/release/zed")
-        if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-            sentry_binaries+=("${target_dir}/${remote_server_triple}/release/remote_server")
-        fi
-        # note: this uploads the unstripped binary which is needed because it contains
-        # .eh_frame data for stack unwinding. see https://github.com/getsentry/symbolic/issues/783
-        for attempt in 1 2 3; do
-            echo "Attempting sentry upload (attempt $attempt/3)..."
-            if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev "${sentry_binaries[@]}"; then
-                echo "Sentry upload successful on attempt $attempt"
-                break
-            else
-                echo "Sentry upload failed on attempt $attempt"
-                if [ $attempt -eq 3 ]; then
-                    echo "All sentry upload attempts failed"
-                fi
-            fi
-        done
-    else
-        echo "missing SENTRY_AUTH_TOKEN. skipping sentry upload."
-    fi
-fi
-
 # Split debug symbols into local .dbg files, then strip debug info and local
-# symbols from the shipped binaries. Sentry receives the full unstripped
-# binaries above; the .dbg files keep symbols recoverable when that upload
-# is skipped.
+# symbols from the shipped binaries.
 # We use llvm-objcopy because GNU objcopy on older distros (e.g. Ubuntu 20.04)
 # doesn't understand CREL sections produced by newer LLVM.
 llvm-objcopy --only-keep-debug "${target_dir}/${target_triple}/release/zed" "${target_dir}/${target_triple}/release/zed.dbg"
