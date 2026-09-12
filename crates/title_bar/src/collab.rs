@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use gpui::{App, Context, IntoElement, Window, h_flex};
+use gpui::{App, Context, IntoElement, Window, div};
 use crate::TitleBar;
 
 pub fn toggle_screen_sharing(
@@ -18,6 +18,6 @@ impl TitleBar {
         _: &mut Window,
         _cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        h_flex().id("collaborator-list")
+        div().id("collaborator-list")
     }
 }
