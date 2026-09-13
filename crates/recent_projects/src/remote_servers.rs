@@ -9,7 +9,6 @@ mod filter;
 
 
 use editor::Editor;
-use extension_host::ExtensionStore;
 use filter::{FilterData, FilteredServer};
 use futures::{FutureExt, StreamExt as _, channel::oneshot, future::Shared};
 use gpui::{
@@ -37,16 +36,15 @@ use std::{
 };
 
 use ui::{
-    CommonAnimationExt, HighlightedLabel, IconButtonShape, KeyBinding, ListItem, ListSeparator,
-    ModalHeader, Navigable, NavigableEntry, Tooltip, prelude::*,
+    HighlightedLabel, IconButtonShape, KeyBinding, ListItem, ListSeparator, Navigable,
+    NavigableEntry, Tooltip, prelude::*,
 };
 use util::{
     ResultExt,
     paths::{PathStyle, RemotePathBuf},
-    rel_path::RelPath,
 };
 use workspace::{
-    AppState, DismissDecision, ModalView, MultiWorkspace, OpenLog, OpenOptions, Toast, Workspace,
+    DismissDecision, ModalView, MultiWorkspace, OpenOptions, Toast, Workspace,
     notifications::{DetachAndPromptErr, NotificationId},
     open_remote_project_with_existing_connection,
 };
@@ -692,9 +690,6 @@ impl RemoteServerPickerDelegate {
     /// keystroke path, see [`Self::update_matches`]); this only reads
     /// [`DefaultState::filtered_servers`].
     fn rebuild_matches(&mut self) {
-        let has_open_project = self.has_open_project;
-        let is_local = self.is_local;
-
         let mut matches = Vec::new();
         if self.query.trim().is_empty() {
             matches.push(RemoteMatch::AddServer);
