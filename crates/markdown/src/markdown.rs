@@ -1423,7 +1423,8 @@ impl Markdown {
                 }
                 if this.options.render_math {
                     let parsed_markdown = this.parsed_markdown.clone();
-                    let font_size = ThemeSettings::get_global(cx).buffer_font_size(cx).as_f32();
+                    let font_size =
+                        ThemeSettings::get_global(cx).markdown_preview_font_size(cx).as_f32() * 1.15;
                     this.math_state.update(&parsed_markdown, font_size, cx);
                 } else {
                     this.math_state.clear();

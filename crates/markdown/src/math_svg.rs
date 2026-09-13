@@ -100,7 +100,7 @@ pub fn display_list_to_svg(display_list: &DisplayList, font_size: f32) -> MathSv
                 let px = *x as f32 * em + PAD;
                 let py = *y as f32 * em + PAD;
                 let w = *width as f32 * em;
-                let t = (*thickness as f32 * em).max(1.0);
+                let t = (*thickness as f32 * em).max(1.6);
                 let fill = color_to_svg(color);
 
                 if *dashed {
@@ -147,7 +147,7 @@ pub fn display_list_to_svg(display_list: &DisplayList, font_size: f32) -> MathSv
                 let stroke_attr = if *is_fill {
                     String::new()
                 } else {
-                    format!(" stroke=\"{}\" stroke-width=\"{:.2}\" fill=\"none\"", fill_attr, 1.5)
+                    format!(" stroke=\"{}\" stroke-width=\"{:.2}\" fill=\"none\"", fill_attr, 1.6)
                 };
                 let fill_attr_final = if *is_fill {
                     format!(" fill=\"{}\"", fill_attr)

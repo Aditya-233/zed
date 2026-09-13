@@ -260,7 +260,7 @@ pub(crate) fn render_math_expression(
             if parsed.is_display {
                 div().child(gpui::img(image)).into_any_element()
             } else {
-                let shift = math_state.text_ascent - baseline_y;
+                let shift = (math_state.text_ascent - baseline_y).max(-4.0);
                 div()
                     .child(gpui::img(image).mt(px(shift)))
                     .into_any_element()
