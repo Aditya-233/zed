@@ -1,5 +1,5 @@
 use collections::HashMap;
-use gpui::{AnyElement, Context, Pixels, RenderImage, Task, StyledText, div, px};
+use gpui::{AnyElement, Context, DevicePixels, Pixels, RenderImage, SvgSize, Task, StyledText, div, px, size};
 use settings::Settings;
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -18,6 +18,7 @@ mod math_svg;
 #[derive(Clone, Debug)]
 pub(crate) struct ParsedMarkdownMathExpression {
     /// Byte range of the full math expression in the source (including delimiters).
+    #[allow(dead_code)]
     pub(crate) source_range: Range<usize>,
     /// The raw LaTeX content (without delimiters).
     pub(crate) latex: SharedString,
@@ -107,6 +108,7 @@ impl MathState {
         self.order.clear();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn invalidate(&mut self) {
         self.cache.clear();
         self.order.clear();
@@ -160,6 +162,23 @@ impl MathState {
     }
 }
 
+fn render_svg_exact(
+    svg_renderer: &gpui::SvgRenderer,
+    svg: &math_svg::MathSvgOutput,
+) -> anyhow::Result<Arc<RenderImage>> {
+    let parsed = svg_renderer
+        .parse_svg(&svg.svg_bytes)
+        .map_err(|e| anyhow::anyhow!("SVG parse error: {}", e))?;
+    let width = DevicePixels((svg.width.ceil() as i32).max(1));
+    let height = DevicePixels((svg.height.ceil() as i32).max(1));
+    svg_renderer
+        .render_parsed(
+            &parsed,
+            SvgSize::ExactSize(size(width, height)),
+        )
+        .map_err(|e| anyhow::anyhow!("SVG render error: {}", e))
+}
+
 impl CachedMathExpression {
     fn new(latex: SharedString, font_size: f32, cx: &mut Context<Markdown>) -> Self {
         let display_tree = Arc::new(OnceLock::new());
@@ -188,16 +207,14 @@ impl CachedMathExpression {
             let _ = dt.set(parse_result);
 
             // Phase 2 — recolor with current theme and render SVG
-            if let Some(Ok((dl, baseline_y))) = dt.get() {
+            if let Some(Ok((dl, _))) = dt.get() {
                 let ratex_color = gpui_color_to_ratex(text_color);
                 let recolored = recolor_display_list(dl, &ratex_color);
                 let svg = math_svg::display_list_to_svg(&recolored, font_size);
-                let image = svg_renderer
-                    .render_single_frame(&svg.svg_bytes, 1.0)
-                    .map_err(|e| anyhow::anyhow!("SVG render error: {}", e));
+                let image = render_svg_exact(&svg_renderer, &svg);
                 let result = image.map(|img| MathRenderResult {
                     image: img,
-                    baseline_y: *baseline_y,
+                    baseline_y: svg.baseline_y,
                 });
                 *rd.lock().unwrap() = Some(result);
             }
@@ -213,18 +230,16 @@ impl CachedMathExpression {
     }
 
     fn recolor_and_render(&self, font_size: f32, text_color: gpui::Hsla, svg_renderer: gpui::SvgRenderer) {
-        let Some(Ok((display_list, baseline_y))) = self.display_tree.get() else {
+        let Some(Ok((display_list, _))) = self.display_tree.get() else {
             return;
         };
         let ratex_color = gpui_color_to_ratex(text_color);
         let recolored = recolor_display_list(display_list, &ratex_color);
         let svg = math_svg::display_list_to_svg(&recolored, font_size);
-        let image = svg_renderer
-            .render_single_frame(&svg.svg_bytes, 1.0)
-            .map_err(|e| anyhow::anyhow!("SVG render error: {}", e));
+        let image = render_svg_exact(&svg_renderer, &svg);
         let result = image.map(|img| MathRenderResult {
             image: img,
-            baseline_y: *baseline_y,
+            baseline_y: svg.baseline_y,
         });
         *self.rendered.lock().unwrap() = Some(result);
     }

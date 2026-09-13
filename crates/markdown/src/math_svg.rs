@@ -100,7 +100,7 @@ pub fn display_list_to_svg(display_list: &DisplayList, font_size: f32) -> MathSv
                 let px = *x as f32 * em + PAD;
                 let py = *y as f32 * em + PAD;
                 let w = *width as f32 * em;
-                let t = (*thickness as f32 * em).max(1.6);
+                let t = (*thickness as f32 * em).max(1.5);
                 let fill = color_to_svg(color);
 
                 if *dashed {
@@ -124,8 +124,8 @@ pub fn display_list_to_svg(display_list: &DisplayList, font_size: f32) -> MathSv
             } => {
                 let px = *x as f32 * em + PAD;
                 let py = *y as f32 * em + PAD;
-                let w = (*width as f32 * em).max(2.0);
-                let h = (*height as f32 * em).max(2.0);
+                let w = (*width as f32 * em).max(1.5);
+                let h = (*height as f32 * em).max(1.5);
                 let fill = color_to_svg(color);
                 svg.push_str(&format!(
                     "<rect x=\"{:.2}\" y=\"{:.2}\" width=\"{:.2}\" height=\"{:.2}\" fill=\"{}\" />",
@@ -141,23 +141,35 @@ pub fn display_list_to_svg(display_list: &DisplayList, font_size: f32) -> MathSv
             } => {
                 let px = *x as f32 * em + PAD;
                 let py = *y as f32 * em + PAD;
-                let d = path_commands_to_svg_d(commands, em, px, py);
                 let fill_attr = color_to_svg(color);
-                let fill_rule = if *is_fill { "evenodd" } else { "nonzero" };
-                let stroke_attr = if *is_fill {
-                    String::new()
+                if *is_fill {
+                    let mut start = 0;
+                    for i in 1..commands.len() {
+                        if matches!(commands[i], PathCommand::MoveTo { .. }) {
+                            let d = path_commands_to_svg_d(&commands[start..i], em, px, py);
+                            if !d.is_empty() {
+                                svg.push_str(&format!(
+                                    "<path d=\"{}\" fill=\"{}\" fill-rule=\"evenodd\" />",
+                                    d, fill_attr
+                                ));
+                            }
+                            start = i;
+                        }
+                    }
+                    let d = path_commands_to_svg_d(&commands[start..], em, px, py);
+                    if !d.is_empty() {
+                        svg.push_str(&format!(
+                            "<path d=\"{}\" fill=\"{}\" fill-rule=\"evenodd\" />",
+                            d, fill_attr
+                        ));
+                    }
                 } else {
-                    format!(" stroke=\"{}\" stroke-width=\"{:.2}\" fill=\"none\"", fill_attr, 1.6)
-                };
-                let fill_attr_final = if *is_fill {
-                    format!(" fill=\"{}\"", fill_attr)
-                } else {
-                    String::new()
-                };
-                svg.push_str(&format!(
-                    "<path d=\"{}\"{} fill-rule=\"{}\"{} />",
-                    d, fill_attr_final, fill_rule, stroke_attr
-                ));
+                    let d = path_commands_to_svg_d(commands, em, px, py);
+                    svg.push_str(&format!(
+                        "<path d=\"{}\" stroke=\"{}\" stroke-width=\"{:.2}\" fill=\"none\" />",
+                        d, fill_attr, 1.5
+                    ));
+                }
             }
         }
     }
@@ -304,17 +316,17 @@ mod tests {
     #[test]
     fn test_display_list_to_svg_rect() {
         let items = vec![DisplayItem::Rect {
-            x: 0,
-            y: 0,
-            width: 10,
-            height: 10,
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
             color: Color::new(0.0, 0.0, 0.0, 1.0),
         }];
         let list = DisplayList {
             items,
-            width: 10,
-            height: 10,
-            depth: 0,
+            width: 10.0,
+            height: 10.0,
+            depth: 0.0,
         };
         let output = display_list_to_svg(&list, 12.0);
         assert!(output.svg_bytes.len() > 50, "SVG should be non-trivial");
@@ -328,12 +340,43 @@ mod tests {
     fn test_display_list_to_svg_empty() {
         let list = DisplayList {
             items: vec![],
-            width: 0,
-            height: 0,
-            depth: 0,
+            width: 0.0,
+            height: 0.0,
+            depth: 0.0,
         };
         let output = display_list_to_svg(&list, 12.0);
         assert!(output.svg_bytes.len() > 0);
+    }
+
+    #[test]
+    fn test_display_list_to_svg_path_multi_moveto() {
+        let items = vec![DisplayItem::Path {
+            x: 0.0,
+            y: 0.0,
+            commands: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 5.0, y: 0.0 },
+                PathCommand::Close,
+                PathCommand::MoveTo { x: 10.0, y: 0.0 },
+                PathCommand::LineTo { x: 15.0, y: 0.0 },
+                PathCommand::Close,
+            ],
+            fill: true,
+            color: Color::new(0.0, 0.0, 0.0, 1.0),
+        }];
+        let list = DisplayList {
+            items,
+            width: 20.0,
+            height: 10.0,
+            depth: 0.0,
+        };
+        let output = display_list_to_svg(&list, 12.0);
+        let svg_str = String::from_utf8_lossy(&output.svg_bytes);
+        assert_eq!(
+            svg_str.matches("<path").count(),
+            2,
+            "Should split subpaths into separate path elements"
+        );
     }
 }
 

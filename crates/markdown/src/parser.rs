@@ -1970,7 +1970,7 @@ mod tests {
         let math_events: Vec<_> = parsed
             .events
             .iter()
-            .filter_map(|(range, event)| match event {
+            .filter_map(|(_range, event)| match event {
                 MarkdownEvent::InlineMath(latex) => Some(latex.clone()),
                 _ => None,
             })
