@@ -7,8 +7,6 @@ extend-exclude = [
     # Typewriter model names used for agent branch names aren't typos.
     "crates/agent_ui/src/branch_names.rs",
 
-    # Contributor names aren't typos.
-    ".mailmap",
 
     # File suffixes aren't typos.
     "crates/theme/src/icon_theme.rs",
