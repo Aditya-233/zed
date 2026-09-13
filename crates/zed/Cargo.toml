@@ -82,7 +82,6 @@ gpui = { workspace = true, features = ["profiler", "stacker"] }
 gpui_platform = { workspace = true, features = [
     "font-kit",
     "wayland",
-    "x11",
 ] }
 gpui_tokio.workspace = true
 image = { workspace = true, optional = true }
@@ -184,16 +183,8 @@ zlog.workspace = true
 zlog_settings.workspace = true
 ztracing.workspace = true
 
-[target.'cfg(target_os = "windows")'.dependencies]
-etw_tracing.workspace = true
-windows.workspace = true
-gpui = { workspace = true, features = ["profiler", "windows-manifest"] }
-
-[build-dependencies]
-windows_resources = { path = "../windows_resources" }
-
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
-gpui = { workspace = true, features = ["profiler", "wayland", "x11"] }
+gpui = { workspace = true, features = ["profiler", "wayland"] }
 ashpd.workspace = true
 image.workspace = true
 

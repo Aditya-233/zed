@@ -42,11 +42,6 @@ extend-exclude = [
     # Protols is the name of the language server.
     "extensions/proto/extension.toml",
     "extensions/proto/src/language_servers/protols.rs",
-    # Windows likes its abbreviations.
-    "crates/gpui_windows/src/directx_renderer.rs",
-    "crates/gpui_windows/src/events.rs",
-    "crates/gpui_windows/src/direct_write.rs",
-    "crates/gpui_windows/src/window.rs",
     # Some typos in the base mdBook CSS.
     "docs/theme/css/",
     # Automatically generated JS.
@@ -63,8 +58,6 @@ extend-exclude = [
     "crates/project_panel/benches/linux_repo_snapshot.txt",
     # Some multibuffer test cases have word fragments that register as typos
     "crates/multi_buffer/src/multi_buffer_tests.rs",
-    # Macos apis
-    "crates/gpui_macos/src/dispatcher.rs",
     # Tests contain partially incomplete words (by design)
     "crates/edit_prediction_cli/src/split_commit.rs",
     "crates/edit_prediction_metrics/src/kept_rate.rs",

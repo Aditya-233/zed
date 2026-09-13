@@ -20,6 +20,7 @@ impl ToolPermissionDecision {
     }
 }
 
+#[allow(dead_code)]
 pub const ALL_TOOL_NAMES: &[&str] = &[
     "terminal",
     "edit_file",

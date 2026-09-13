@@ -17,6 +17,7 @@ impl SettingsSectionHeader {
         }
     }
 
+    #[allow(dead_code)]
     pub fn icon(mut self, icon: IconName) -> Self {
         self.icon = Some(icon);
         self

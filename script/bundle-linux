@@ -82,6 +82,11 @@ elif [[ "$(uname -m)" == "aarch64" ]]; then
 else
     LINKER_FLAGS=""
 fi
+
+if command -v sccache >/dev/null 2>&1; then
+    export RUSTC_WRAPPER="$(command -v sccache)"
+    export CARGO_BUILD_RUSTC_WRAPPER="$(command -v sccache)"
+fi
 export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--as-needed -C link-arg=-Wl,--disable-new-dtags -C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
 cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli --timings
 
@@ -181,7 +186,10 @@ find_libs() {
 
 mkdir -p "${zed_dir}/lib"
 rm -rf "${zed_dir}/lib/*"
-cp $(find_libs) "${zed_dir}/lib"
+bundled_libs=$(find_libs || true)
+if [[ -n "${bundled_libs}" ]]; then
+    cp ${bundled_libs} "${zed_dir}/lib"
+fi
 
 # Icons
 mkdir -p "${zed_dir}/share/icons/hicolor/512x512/apps"

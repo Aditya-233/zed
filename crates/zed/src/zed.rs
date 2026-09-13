@@ -1869,6 +1869,7 @@ fn init_reduce_motion(cx: &mut App) {
     cx.observe_global::<SettingsStore>(apply).detach();
 }
 
+#[allow(dead_code)]
 pub fn watch_user_agents_md(_fs: Arc<dyn fs::Fs>, _cx: &mut App) {}
 
 pub fn watch_settings_files(fs: Arc<dyn fs::Fs>, cx: &mut App) {

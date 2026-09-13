@@ -73,10 +73,6 @@ thiserror.workspace = true
 rayon.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
-[target.'cfg(windows)'.dependencies]
-windows.workspace = true
-gpui = { workspace = true, features = ["windows-manifest"] }
-
 [dev-dependencies]
 action_log.workspace = true
 agent = { workspace = true, features = ["test-support"] }
