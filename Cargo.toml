@@ -716,6 +716,13 @@ pulldown-cmark = { version = "0.13.0", default-features = false }
 quick-xml = "0.41"
 quote = "1.0.9"
 rand = "0.9"
+ratex-render = { version = "0.1.13", features = ["embed-fonts"] }
+ratex-layout = "0.1.13"
+ratex-parser = "0.1.13"
+ratex-font = "0.1.13"
+ratex-font-loader = { version = "0.1.13", features = ["embed-fonts"] }
+ratex-types = "0.1.13"
+ab_glyph = "0.2"
 raw-window-handle = "0.6"
 rayon = "1.8"
 regex = "1.5"
