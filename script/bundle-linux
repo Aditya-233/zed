@@ -57,28 +57,20 @@ commit=$(git rev-parse HEAD | cut -c 1-7)
 version_info=$(rustc --version --verbose)
 host_line=$(echo "$version_info" | grep host)
 target_triple=${host_line#*: }
-musl_triple=${target_triple%-gnu}-musl
-remote_server_triple=${REMOTE_SERVER_TARGET:-"${musl_triple}"}
-rustup_installed=false
-if command -v rustup >/dev/null 2>&1; then
-    rustup_installed=true
-fi
 
 # Generate the licenses first, so they can be baked into the binaries
 script/generate-licenses
 
-if "$rustup_installed" && [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    rustup target add "$remote_server_triple"
-fi
-
 export CC=${CC:-$(which clang)}
 
 # Build binary in release mode
+TARGET_CPU_FLAG="${TARGET_CPU_FLAG:--C target-cpu=raptorlake}"
+
 # Use mold if available for ultra-fast linking on Linux x86_64, or lld on aarch64.
 if command -v mold >/dev/null 2>&1; then
-    LINKER_FLAGS="-C link-arg=-fuse-ld=mold -C link-arg=-Wl,--icf=all"
+    LINKER_FLAGS="-C link-arg=-fuse-ld=mold -C link-arg=-Wl,--icf=all -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,relro"
 elif [[ "$(uname -m)" == "aarch64" ]]; then
-    LINKER_FLAGS="-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--icf=all"
+    LINKER_FLAGS="-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--icf=all -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,relro"
 else
     LINKER_FLAGS=""
 fi
@@ -87,7 +79,7 @@ if command -v sccache >/dev/null 2>&1; then
     export RUSTC_WRAPPER="$(command -v sccache)"
     export CARGO_BUILD_RUSTC_WRAPPER="$(command -v sccache)"
 fi
-export RUSTFLAGS="${RUSTFLAGS:-} ${LINKER_FLAGS} -Z share-generics=y -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--as-needed -C link-arg=-Wl,--disable-new-dtags -C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
+export RUSTFLAGS="${RUSTFLAGS:-} ${TARGET_CPU_FLAG} ${LINKER_FLAGS} -Z share-generics=y -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--as-needed -C link-arg=-Wl,--disable-new-dtags -C link-arg=-Wl,-rpath,\$ORIGIN/../lib"
 cargo --config .cargo/bundle-config.toml build --release --target "${target_triple}" --package zed --package cli --timings
 
 # Print crate compilation timing summary
@@ -122,17 +114,6 @@ if timing_files:
         print(f"Notice: Could not parse timing summary: {e}")
 PY_EOF
 
-
-# Build remote_server only when explicitly enabled (saves ~22 minutes in CI)
-if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    if [[ "$remote_server_triple" == "$musl_triple" ]]; then
-        export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
-        musl_cc_var="CC_$(echo "$remote_server_triple" | tr '-' '_')"
-        export "$musl_cc_var"=musl-gcc
-    fi
-    cargo --config .cargo/bundle-config.toml build --release --target "${remote_server_triple}" --package remote_server
-fi
-
 # Split debug symbols into local .dbg files, then strip debug info and local
 # symbols from the shipped binaries.
 # We use llvm-objcopy because GNU objcopy on older distros (e.g. Ubuntu 20.04)
@@ -140,20 +121,6 @@ fi
 llvm-objcopy --only-keep-debug "${target_dir}/${target_triple}/release/zed" "${target_dir}/${target_triple}/release/zed.dbg"
 llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/zed"
 llvm-objcopy --strip-debug --discard-all "${target_dir}/${target_triple}/release/cli"
-
-if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    llvm-objcopy --only-keep-debug "${target_dir}/${remote_server_triple}/release/remote_server" "${target_dir}/${remote_server_triple}/release/remote_server.dbg"
-    llvm-objcopy --strip-debug --discard-all "${target_dir}/${remote_server_triple}/release/remote_server"
-
-    # Ensure that remote_server does not depend on libssl nor libcrypto, as we got rid of these deps.
-    if ldd "${target_dir}/${remote_server_triple}/release/remote_server" | grep -q 'libcrypto\|libssl'; then
-        if [[ "$remote_server_triple" == *-musl ]]; then
-            echo "Error: remote_server still depends on libssl or libcrypto" && exit 1
-        else
-            echo "Info: Using non-musl remote-server build."
-        fi
-    fi
-fi
 
 suffix=""
 if [ "$channel" != "stable" ]; then
@@ -231,7 +198,3 @@ rm -rf "${archive}"
 remove_match="zed(-[a-zA-Z0-9]+)?-linux-$(uname -m)\.tar\.gz"
 ls "${target_dir}/release" | grep -E ${remove_match} | xargs -d "\n" -I {} rm -f "${target_dir}/release/{}" || true
 tar -czvf "${target_dir}/release/$archive" -C ${temp_dir} "zed$suffix.app"
-
-if [[ "${BUILD_REMOTE_SERVER:-false}" == "true" ]]; then
-    gzip -f --stdout --best "${target_dir}/${remote_server_triple}/release/remote_server" > "${target_dir}/zed-remote-server-linux-${arch}.gz"
-fi

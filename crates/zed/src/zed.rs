@@ -20,7 +20,6 @@ use assets::Assets;
 use breadcrumbs::Breadcrumbs;
 use client::zed_urls;
 use collections::VecDeque;
-use debugger_ui::debugger_panel::DebugPanel;
 use editor::{Editor, MultiBuffer};
 use extension_host::ExtensionStore;
 use feature_flags::{FeatureFlagAppExt as _, PanicFeatureFlag};
@@ -50,7 +49,6 @@ use migrate::{MigrationBanner, MigrationEvent, MigrationNotification, MigrationT
 use migrator::migrate_keymap;
 use onboarding::multibuffer_hint::MultibufferHint;
 pub use open_listener::*;
-use outline_panel::OutlinePanel;
 use paths::{
     local_debug_file_relative_path, local_settings_file_relative_path,
     local_tasks_file_relative_path,
@@ -682,10 +680,8 @@ fn show_software_emulation_warning_if_needed(
 fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<anyhow::Result<()>> {
     cx.spawn_in(window, async move |workspace_handle, cx| {
         let project_panel = ProjectPanel::load(workspace_handle.clone(), cx.clone());
-        let outline_panel = OutlinePanel::load(workspace_handle.clone(), cx.clone());
         let terminal_panel = TerminalPanel::load(workspace_handle.clone(), cx.clone());
         let git_panel = GitPanel::load(workspace_handle.clone(), cx.clone());
-        let debug_panel = DebugPanel::load(workspace_handle.clone(), cx);
 
         async fn add_panel_when_ready(
             panel_task: impl Future<Output = anyhow::Result<Entity<impl workspace::Panel>>> + 'static,
@@ -704,10 +700,8 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
 
         futures::join!(
             add_panel_when_ready(project_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(outline_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(terminal_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(debug_panel, workspace_handle.clone(), cx.clone()),
         );
 
         workspace_handle.update(cx, |workspace, cx| {
@@ -1116,14 +1110,6 @@ fn register_actions(
         )
         .register_action(
             |workspace: &mut Workspace,
-             _: &outline_panel::ToggleFocus,
-             window: &mut Window,
-             cx: &mut Context<Workspace>| {
-                workspace.toggle_panel_focus::<OutlinePanel>(window, cx);
-            },
-        )
-        .register_action(
-            |workspace: &mut Workspace,
              _: &terminal_panel::ToggleFocus,
              window: &mut Window,
              cx: &mut Context<Workspace>| {
@@ -1283,8 +1269,6 @@ fn initialize_pane(
             toolbar.add_item(project_search_bar, window, cx);
             let lsp_log_item = cx.new(|_| LspLogToolbarItemView::new());
             toolbar.add_item(lsp_log_item, window, cx);
-            let dap_log_item = cx.new(|_| debugger_tools::DapLogToolbarItemView::new());
-            toolbar.add_item(dap_log_item, window, cx);
             let syntax_tree_item = cx.new(|_| language_tools::SyntaxTreeToolbarItemView::new());
             toolbar.add_item(syntax_tree_item, window, cx);
             let migration_banner =
@@ -5262,7 +5246,7 @@ mod tests {
         // From the JetBrains keymap
         use workspace::ActivatePreviousItem;
         // From the VSCode keymap
-        use debugger_ui::Start;
+        gpui::actions!(debugger, [Start]);
 
         app_state
             .fs
@@ -5817,20 +5801,16 @@ mod tests {
             editor::init(cx);
             git_ui::init(cx);
             project_panel::init(cx);
-            outline_panel::init(cx);
             terminal_view::init(cx);
             image_viewer::init(cx);
             language_model::init(cx);
             web_search::init(cx);
 
-            repl::init(app_state.fs.clone(), cx);
-            repl::notebook::init(cx);
             tasks_ui::init(cx);
             project::debugger::breakpoint_store::BreakpointStore::init(
                 &app_state.client.clone().into(),
             );
             project::debugger::dap_store::DapStore::init(&app_state.client.clone().into(), cx);
-            debugger_ui::init(cx);
             initialize_workspace(app_state.clone(), cx);
             search::init(cx);
             lsp_locations::init(cx);

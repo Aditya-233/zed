@@ -72,7 +72,6 @@ use zed::{
 };
 use crate::zed::{OpenRequestKind, eager_load_active_theme_and_icon_theme};
 
-#[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -469,8 +468,7 @@ fn main() {
             let settings = &ProjectSettings::get_global(cx).node;
             let options = NodeBinaryOptions {
                 allow_path_lookup: !settings.ignore_system_version,
-                // TODO: Expose this setting
-                allow_binary_download: true,
+                allow_binary_download: false,
                 use_paths: settings.path.as_ref().map(|node_path| {
                     let node_path = PathBuf::from(shellexpand::tilde(node_path).as_ref());
                     let npm_path = settings
@@ -493,7 +491,6 @@ fn main() {
 
         let node_runtime = NodeRuntime::new(client.http_client(), Some(shell_env_loaded_rx), rx);
 
-        debug_adapter_extension::init(extension_host_proxy.clone(), cx);
         languages::init(languages.clone(), fs.clone(), node_runtime.clone(), cx);
         let user_store = cx.new(|cx| UserStore::new(client.clone(), cx));
         let workspace_store = cx.new(|cx| WorkspaceStore::new(client.clone(), cx));
@@ -523,8 +520,6 @@ fn main() {
         #[cfg(target_os = "macos")]
         zed::move_to_applications::init(cx);
         project::Project::init(&client, cx);
-        debugger_ui::init(cx);
-        debugger_tools::init(cx);
         client::init(&client, cx);
         feature_flags::FeatureFlagStore::init(cx);
 
@@ -570,7 +565,6 @@ fn main() {
         AppState::set_global(app_state.clone(), cx);
 
         auto_update::init(client.clone(), cx);
-        dap_adapters::init(cx);
         auto_update_ui::init(cx);
         extension_host::init(
             extension_host_proxy.clone(),
@@ -593,7 +587,6 @@ fn main() {
         web_search::init(cx);
         snippet_provider::init(cx);
 
-        repl::init(app_state.fs.clone(), cx);
         recent_projects::init(cx);
 
         load_embedded_fonts(cx);
@@ -602,7 +595,6 @@ fn main() {
 
         editor::init(cx);
         image_viewer::init(cx);
-        repl::notebook::init(cx);
         diagnostics::init(cx);
         workspace::init(app_state.clone(), cx);
         ui_prompt::init(cx);
@@ -614,7 +606,6 @@ fn main() {
         call_hierarchy::init(cx);
         project_symbols::init(cx);
         project_panel::init(cx);
-        outline_panel::init(cx);
         tasks_ui::init(cx);
         snippets_ui::init(cx);
         search::init(cx);

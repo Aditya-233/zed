@@ -40,11 +40,7 @@ members = [
     "crates/copilot_chat",
     "crates/credentials_provider",
     "crates/dap",
-    "crates/dap_adapters",
     "crates/db",
-    "crates/debug_adapter_extension",
-    "crates/debugger_tools",
-    "crates/debugger_ui",
     "crates/deepseek",
     "crates/diagnostics",
     "crates/docs_preprocessor",
@@ -138,7 +134,6 @@ members = [
     "crates/openai_subscribed",
     "crates/opencode",
     "crates/outline",
-    "crates/outline_panel",
     "crates/panel",
     "crates/path",
     "crates/paths",
@@ -159,7 +154,6 @@ members = [
     "crates/release_channel",
     "crates/remote",
     "crates/remote_connection",
-    "crates/repl",
     "crates/reqwest_client",
     "crates/rope",
     "crates/rpc",
@@ -297,11 +291,7 @@ copilot_chat = { path = "crates/copilot_chat" }
 copilot_ui = { path = "crates/copilot_ui" }
 credentials_provider = { path = "crates/credentials_provider" }
 dap = { path = "crates/dap" }
-dap_adapters = { path = "crates/dap_adapters" }
 db = { path = "crates/db" }
-debug_adapter_extension = { path = "crates/debug_adapter_extension" }
-debugger_tools = { path = "crates/debugger_tools" }
-debugger_ui = { path = "crates/debugger_ui" }
 deepseek = { path = "crates/deepseek" }
 derive_refineable = { path = "crates/refineable/derive_refineable" }
 diagnostics = { path = "crates/diagnostics" }
@@ -389,7 +379,6 @@ open_router = { path = "crates/open_router", features = ["schemars"] }
 openai_subscribed = { path = "crates/openai_subscribed" }
 opencode = { path = "crates/opencode" }
 outline = { path = "crates/outline" }
-outline_panel = { path = "crates/outline_panel" }
 panel = { path = "crates/panel" }
 path = { path = "crates/path" }
 paths = { path = "crates/paths" }
@@ -409,7 +398,6 @@ refineable = { path = "crates/refineable" }
 release_channel = { path = "crates/release_channel" }
 remote = { path = "crates/remote" }
 remote_connection = { path = "crates/remote_connection" }
-repl = { path = "crates/repl" }
 reqwest_client = { path = "crates/reqwest_client" }
 rodio = { git = "https://github.com/RustAudio/rodio", rev = "e50e726ddd0292f6ef9de0dda6b90af4ed1fb66a", features = ["wav", "playback", "wav_output", "recording"] }
 rope = { path = "crates/rope" }

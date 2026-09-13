@@ -30,7 +30,6 @@ test-support = [
     "terminal_view/test-support",
     "image_viewer/test-support",
     "recent_projects/test-support",
-    "repl/test-support",
     "title_bar/test-support",
 ]
 
@@ -56,11 +55,7 @@ clock = { workspace = true, optional = true }
 collections.workspace = true
 command_palette.workspace = true
 component_preview.workspace = true
-dap_adapters.workspace = true
 db.workspace = true
-debug_adapter_extension.workspace = true
-debugger_tools.workspace = true
-debugger_ui.workspace = true
 diagnostics.workspace = true
 editor.workspace = true
 encoding_selector.workspace = true
@@ -114,13 +109,12 @@ markdown.workspace = true
 markdown_preview.workspace = true
 menu.workspace = true
 migrator.workspace = true
-mimalloc = { version = "0.1", optional = true }
+mimalloc = { version = "0.1", default-features = false }
 miniprofiler_ui.workspace = true
 node_runtime.workspace = true
 notifications.workspace = true
 onboarding.workspace = true
 outline.workspace = true
-outline_panel.workspace = true
 parking_lot.workspace = true
 paths.workspace = true
 picker.workspace = true
@@ -132,7 +126,6 @@ proto.workspace = true
 recent_projects.workspace = true
 release_channel.workspace = true
 remote.workspace = true
-repl.workspace = true
 reqwest.workspace = true
 reqwest_client.workspace = true
 rope.workspace = true
@@ -211,7 +204,6 @@ title_bar = { workspace = true, features = ["test-support"] }
 workspace = { workspace = true, features = ["test-support"] }
 image.workspace = true
 search = { workspace = true, features = ["test-support"] }
-repl = { workspace = true, features = ["test-support"] }
 
 
 [package.metadata.bundle-dev]
