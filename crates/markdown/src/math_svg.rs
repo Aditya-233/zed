@@ -212,38 +212,70 @@ fn resolve_glyph_path<'a>(
     let scale = 1000.0 / units_per_em;
 
     let mut d = String::with_capacity(256);
+    let mut last_end: Option<(f32, f32)> = None;
+
     for curve in outlines.iter() {
         use ab_glyph::OutlineCurve;
-        match curve {
+        let (start, end) = match curve {
             OutlineCurve::Line(p0, p1) => {
-                if d.is_empty() {
-                    d.push_str(&format!("M{} {}", p0.x * scale, -p0.y * scale));
-                }
-                d.push_str(&format!(" L{} {}", p1.x * scale, -p1.y * scale));
+                let sx = p0.x * scale;
+                let sy = -p0.y * scale;
+                let ex = p1.x * scale;
+                let ey = -p1.y * scale;
+                ((sx, sy), (ex, ey))
             }
-            OutlineCurve::Quad(p0, p1, p2) => {
-                if d.is_empty() {
-                    d.push_str(&format!("M{} {}", p0.x * scale, -p0.y * scale));
-                }
+            OutlineCurve::Quad(p0, _, p2) => {
+                let sx = p0.x * scale;
+                let sy = -p0.y * scale;
+                let ex = p2.x * scale;
+                let ey = -p2.y * scale;
+                ((sx, sy), (ex, ey))
+            }
+            OutlineCurve::Cubic(p0, _, _, p3) => {
+                let sx = p0.x * scale;
+                let sy = -p0.y * scale;
+                let ex = p3.x * scale;
+                let ey = -p3.y * scale;
+                ((sx, sy), (ex, ey))
+            }
+        };
+
+        let need_move = match last_end {
+            None => true,
+            Some((lx, ly)) => (lx - start.0).abs() > 0.01 || (ly - start.1).abs() > 0.01,
+        };
+
+        if need_move {
+            if last_end.is_some() {
+                d.push('Z');
+            }
+            d.push_str(&format!("M{:.2} {:.2}", start.0, start.1));
+        }
+
+        match curve {
+            OutlineCurve::Line(_, p1) => {
+                d.push_str(&format!(" L{:.2} {:.2}", p1.x * scale, -p1.y * scale));
+            }
+            OutlineCurve::Quad(_, p1, p2) => {
                 d.push_str(&format!(
-                    " Q{} {} {} {}",
+                    " Q{:.2} {:.2} {:.2} {:.2}",
                     p1.x * scale, -p1.y * scale, p2.x * scale, -p2.y * scale
                 ));
             }
-            OutlineCurve::Cubic(p0, p1, p2, p3) => {
-                if d.is_empty() {
-                    d.push_str(&format!("M{} {}", p0.x * scale, -p0.y * scale));
-                }
+            OutlineCurve::Cubic(_, p1, p2, p3) => {
                 d.push_str(&format!(
-                    " C{} {} {} {} {} {}",
+                    " C{:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
                     p1.x * scale, -p1.y * scale,
                     p2.x * scale, -p2.y * scale,
                     p3.x * scale, -p3.y * scale
                 ));
             }
         }
+
+        last_end = Some(end);
     }
-    if !d.is_empty() {
+
+    if last_end.is_some() {
         d.push('Z');
     }
 
@@ -376,6 +408,34 @@ mod tests {
             svg_str.matches("<path").count(),
             2,
             "Should split subpaths into separate path elements"
+        );
+    }
+
+    #[test]
+    fn test_display_list_to_svg_glyph_multi_contour() {
+        let items = vec![DisplayItem::GlyphPath {
+            x: 0.0,
+            y: 0.0,
+            scale: 1.0,
+            font: "Main-Bold".to_string(),
+            char_code: 65,
+            color: Color::new(0.0, 0.0, 0.0, 1.0),
+        }];
+        let list = DisplayList {
+            items,
+            width: 10.0,
+            height: 10.0,
+            depth: 0.0,
+        };
+        let output = display_list_to_svg(&list, 16.0);
+        let svg_str = String::from_utf8_lossy(&output.svg_bytes);
+        assert!(
+            svg_str.matches('M').count() >= 2,
+            "Glyph 'A' must have at least 2 contours with MoveTo"
+        );
+        assert!(
+            svg_str.contains("ZM"),
+            "Contours must be closed with Z before moving to the next contour"
         );
     }
 }
