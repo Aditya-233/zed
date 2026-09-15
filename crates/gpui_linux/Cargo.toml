@@ -31,10 +31,6 @@ wayland = [
     "open",
     "gpui/wayland",
 ]
-screen-capture = [
-    "gpui/screen-capture",
-    "scap",
-]
 
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
@@ -73,9 +69,6 @@ filedescriptor = { version = "0.8.2", optional = true }
 open = { version = "5.2.0", optional = true }
 xkbcommon = { version = "0.8.0", default-features = false, optional = true }
 
-# Screen capture
-scap = { workspace = true, optional = true }
-
 # Wayland
 calloop-wayland-source = { version = "0.4.1", optional = true }
 wayland-backend = { version = "0.3.15", features = [
@@ -99,4 +92,4 @@ wayland-protocols-wlr = { version = "0.3.9", features = [
 
 
 [package.metadata.cargo-shear]
-ignored = ["bitflags", "scap"]
+ignored = ["bitflags"]

@@ -9,7 +9,7 @@ mod extension_store_test;
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_compression::futures::bufread::GzipDecoder;
 use async_tar::Archive;
-use client::{Client, proto, telemetry::Telemetry};
+use client::{Client, telemetry::Telemetry};
 use cloud_api_types::{ExtensionMetadata, ExtensionProvides, GetExtensionsResponse};
 use collections::{BTreeMap, BTreeSet, FxHashSet, HashMap, HashSet, btree_map};
 pub use extension::ExtensionManifest;
@@ -24,15 +24,15 @@ use futures::future::{Shared, join_all};
 use futures::{
     AsyncReadExt as _, Future, FutureExt as _, StreamExt as _,
     channel::{
-        mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+        mpsc::{UnboundedSender, unbounded},
         oneshot,
     },
     io::BufReader,
     select_biased,
 };
 use gpui::{
-    App, AppContext as _, AsyncApp, Context, Entity, EntityId, EventEmitter, Global, Subscription,
-    Task, TaskExt, UpdateGlobal as _, WeakEntity, actions,
+    App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, Global, Task, TaskExt,
+    UpdateGlobal as _, WeakEntity, actions,
 };
 use http_client::{AsyncBody, HttpClient, HttpClientWithUrl};
 use language::{
@@ -40,16 +40,14 @@ use language::{
     QueryFileContents, QueryFiles, Rope,
 };
 use node_runtime::NodeRuntime;
-use project::{ContextProviderWithTasks, Project};
+use project::ContextProviderWithTasks;
 use release_channel::ReleaseChannel;
-use remote::{ConnectionState, RemoteClient, RemoteClientEvent};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use settings::{SemanticTokenRules, Settings, SettingsStore};
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::{
     borrow::Cow,
     cmp::Ordering,
@@ -59,10 +57,7 @@ use std::{
 };
 use task::TaskTemplates;
 use url::Url;
-use util::{
-    PathExt, ResultExt,
-    paths::{PathStyle, RemotePathBuf},
-};
+use util::{PathExt, ResultExt};
 use wasm_host::{
     WasmExtension, WasmHost,
     wit::{is_supported_wasm_api_version, wasm_api_version_range},
@@ -73,34 +68,9 @@ pub use extension::{
 };
 pub use extension_settings::ExtensionSettings;
 
-use crate::headless_host::hash_directory_contents;
-
 pub const RELOAD_DEBOUNCE_DURATION: Duration = Duration::from_millis(200);
 const FS_WATCH_LATENCY: Duration = Duration::from_millis(100);
-pub(crate) const REMOTE_SYNC_RETRY_DELAY: Duration = Duration::from_secs(1);
-pub(crate) const MAX_REMOTE_SYNC_RETRY_DELAY: Duration = Duration::from_secs(60);
-pub(crate) const MAX_REMOTE_SYNC_ATTEMPTS: usize = 10;
-pub(crate) const REMOTE_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-
-pub(crate) fn remote_sync_retry_delay(attempts: usize) -> Duration {
-    let exponential = REMOTE_SYNC_RETRY_DELAY * 2u32.saturating_pow(attempts.min(30) as u32);
-    exponential.min(MAX_REMOTE_SYNC_RETRY_DELAY)
-}
-
-async fn with_remote_sync_timeout<T>(
-    cx: &AsyncApp,
-    timeout: Duration,
-    description: &str,
-    future: impl Future<Output = Result<T>>,
-) -> Result<T> {
-    let timer = cx.background_executor().timer(timeout).fuse();
-    let future = future.fuse();
-    futures::pin_mut!(timer, future);
-    select_biased! {
-        result = future => result,
-        _ = timer => anyhow::bail!("timed out after {timeout:?} while {description}"),
-    }
-}
+pub const REMOTE_SYNC_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// The current extension [`SchemaVersion`] supported by Zed.
 const CURRENT_SCHEMA_VERSION: SchemaVersion = SchemaVersion(1);
@@ -174,20 +144,7 @@ pub struct ExtensionStore {
     pub wasm_host: Arc<WasmHost>,
     pub wasm_extensions: Vec<(Arc<ExtensionManifest>, WasmExtension)>,
     pub tasks: Vec<Task<()>>,
-    pub(crate) remote_clients: HashMap<EntityId, RemoteClientState>,
     pub(crate) initial_index_load: Shared<Task<()>>,
-}
-
-pub(crate) struct RemoteClientState {
-    dirty_tx: UnboundedSender<RemoteSyncSignal>,
-    _task: Task<()>,
-    _subscriptions: Subscription,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RemoteSyncSignal {
-    IndexChanged,
-    Reconnected,
 }
 
 #[derive(Clone, Copy)]
@@ -222,6 +179,7 @@ pub struct ExtensionIndex {
 }
 
 impl ExtensionIndex {
+    #[allow(dead_code)]
     fn extensions_to_sync_to_remote(&self) -> RemoteSyncExtensions {
         let mut extensions = RemoteSyncExtensions::default();
 
@@ -235,9 +193,11 @@ impl ExtensionIndex {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 struct RemoteSyncExtensions(HashMap<Arc<str>, ExtensionIndexEntry>);
 
+#[allow(dead_code)]
 impl RemoteSyncExtensions {
     fn insert_extension_and_language_dependencies(
         &mut self,
@@ -338,16 +298,6 @@ pub fn init(
     });
 
     cx.set_global(GlobalExtensionStore(store));
-
-    cx.observe_new::<Project>(|project, _window, cx| {
-        let Some(client) = project.remote_client() else {
-            return;
-        };
-        if let Some(store) = ExtensionStore::try_global(cx) {
-            store.update(cx, |store, cx| store.register_remote_client(client, cx));
-        }
-    })
-    .detach();
 }
 
 impl ExtensionStore {
@@ -403,7 +353,6 @@ impl ExtensionStore {
             reload_tx,
             tasks: Vec::new(),
 
-            remote_clients: HashMap::default(),
             initial_index_load: Task::ready(()).shared(),
         };
 
@@ -1311,15 +1260,6 @@ impl ExtensionStore {
             extensions_to_unload.len() - reload_count
         );
 
-        let old_remote_sync_extensions = old_index.extensions_to_sync_to_remote();
-        let new_remote_sync_extensions = new_index.extensions_to_sync_to_remote();
-        let remote_sync_changed = extensions_to_unload
-            .iter()
-            .any(|id| old_remote_sync_extensions.contains(id.as_ref()))
-            || extensions_to_load
-                .iter()
-                .any(|id| new_remote_sync_extensions.contains(id.as_ref()));
-
         let extension_ids = extensions_to_load
             .iter()
             .filter_map(|id| {
@@ -1541,9 +1481,6 @@ impl ExtensionStore {
         self.extension_index = new_index;
         cx.notify();
         cx.emit(Event::ExtensionsUpdated);
-        if remote_sync_changed {
-            self.sync_remote_clients();
-        }
 
         cx.spawn(async move |this, cx| {
             let semantic_token_rules_to_add = cx
@@ -1909,6 +1846,7 @@ impl ExtensionStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn prepare_remote_extension(
         &mut self,
         extension_id: Arc<str>,
@@ -1986,342 +1924,6 @@ impl ExtensionStore {
 
             Ok(())
         })
-    }
-
-    fn sync_remote_clients(&mut self) {
-        for state in self.remote_clients.values() {
-            state
-                .dirty_tx
-                .unbounded_send(RemoteSyncSignal::IndexChanged)
-                .ok();
-        }
-    }
-
-    async fn reconcile_remote_client(
-        this: WeakEntity<Self>,
-        client: WeakEntity<RemoteClient>,
-        mut dirty_rx: UnboundedReceiver<RemoteSyncSignal>,
-        cx: &mut AsyncApp,
-    ) {
-        let mut failed_attempts = 0_usize;
-        loop {
-            while let Ok(signal) = dirty_rx.try_recv() {
-                if signal == RemoteSyncSignal::Reconnected {
-                    failed_attempts = 0;
-                }
-            }
-
-            let Ok(connection_state) =
-                client.read_with(cx, |client, _cx| client.connection_state())
-            else {
-                return;
-            };
-            if connection_state == ConnectionState::Disconnected
-                || connection_state == ConnectionState::Reconnecting
-            {
-                failed_attempts = 0;
-                if dirty_rx.next().await.is_none() {
-                    return;
-                }
-                continue;
-            }
-
-            match Self::sync_extensions_to_remote(&this, client.clone(), cx).await {
-                Ok(()) => {
-                    failed_attempts = 0;
-                    if dirty_rx.next().await.is_none() {
-                        return;
-                    }
-                }
-                Err(error) => {
-                    failed_attempts += 1;
-                    if failed_attempts >= MAX_REMOTE_SYNC_ATTEMPTS {
-                        log::error!(
-                            "Failed to sync extensions to a remote client {failed_attempts} times, waiting for an extension or connection change before retrying: {error:#}"
-                        );
-                        match dirty_rx.next().await {
-                            None => return,
-                            Some(RemoteSyncSignal::Reconnected) => failed_attempts = 0,
-                            Some(RemoteSyncSignal::IndexChanged) => {}
-                        }
-                        continue;
-                    }
-                    let delay = remote_sync_retry_delay(failed_attempts - 1);
-                    log::error!(
-                        "Failed to sync extensions to a remote client (attempt {failed_attempts}), will retry in {delay:?}: {error:#}"
-                    );
-                    let timer = cx.background_executor().timer(delay).fuse();
-                    futures::pin_mut!(timer);
-                    loop {
-                        select_biased! {
-                            signal = dirty_rx.next() => {
-                                match signal {
-                                    None => return,
-                                    Some(RemoteSyncSignal::Reconnected) => {
-                                        failed_attempts = 0;
-                                        break;
-                                    }
-                                    Some(RemoteSyncSignal::IndexChanged) => {}
-                                }
-                            }
-                            _ = timer => break,
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    async fn sync_extensions_to_remote(
-        this: &WeakEntity<Self>,
-        client: WeakEntity<RemoteClient>,
-        cx: &mut AsyncApp,
-    ) -> Result<()> {
-        let entries = this.update(cx, |this, _cx| {
-            this.extension_index
-                .extensions_to_sync_to_remote()
-                .into_entries()
-                .collect::<Vec<_>>()
-        })?;
-        let mut prepared_dev_payloads = HashMap::default();
-        let mut extensions = Vec::new();
-        for (id, entry) in entries {
-            let mut content_fingerprint = None;
-            if entry.dev {
-                match Self::prepare_dev_extension_payload(this, &id, cx).await {
-                    Ok((payload_dir, fingerprint)) => {
-                        content_fingerprint = Some(fingerprint);
-                        prepared_dev_payloads.insert(id.to_string(), payload_dir);
-                    }
-                    Err(error) => {
-                        log::warn!(
-                            "failed to prepare dev extension {id} for a remote sync: {error:#}"
-                        );
-                    }
-                }
-            }
-            extensions.push(proto::Extension {
-                id: id.to_string(),
-                version: entry.manifest.version.to_string(),
-                dev: entry.dev,
-                content_fingerprint,
-            });
-        }
-
-        let request = client.update(cx, |client, _cx| {
-            client
-                .proto_client()
-                .request(proto::SyncExtensions { extensions })
-        })?;
-        let response = with_remote_sync_timeout(
-            cx,
-            REMOTE_SYNC_TIMEOUT,
-            "requesting the remote extension list",
-            request,
-        )
-        .await?;
-        let path_style = client.read_with(cx, |client, _| client.path_style())?;
-
-        let mut failed_installs = Vec::new();
-        for missing_extension in response.missing_extensions.into_iter() {
-            let prepared_payload = prepared_dev_payloads.remove(&missing_extension.id);
-            if let Err(error) = Self::install_extension_on_remote(
-                this,
-                &client,
-                &missing_extension,
-                &response.tmp_dir,
-                path_style,
-                prepared_payload,
-                cx,
-            )
-            .await
-            {
-                log::error!(
-                    "Failed to install extension {} on the remote: {error:#}",
-                    missing_extension.id
-                );
-                failed_installs.push(missing_extension.id);
-            }
-        }
-        if !prepared_dev_payloads.is_empty() {
-            cx.background_executor()
-                .spawn(async move { drop(prepared_dev_payloads) })
-                .detach();
-        }
-
-        anyhow::ensure!(
-            failed_installs.is_empty(),
-            "failed to install extensions on the remote: {failed_installs:?}"
-        );
-        anyhow::Ok(())
-    }
-
-    async fn prepare_dev_extension_payload(
-        this: &WeakEntity<Self>,
-        id: &Arc<str>,
-        cx: &mut AsyncApp,
-    ) -> Result<(tempfile::TempDir, u64)> {
-        let payload_dir = cx
-            .background_executor()
-            .spawn(async move { tempfile::tempdir() })
-            .await?;
-        this.update(cx, |this, cx| {
-            this.prepare_remote_extension(id.clone(), true, payload_dir.path().to_owned(), cx)
-        })?
-        .await?;
-        let fs = this.read_with(cx, |this, _cx| this.fs.clone())?;
-        let fingerprint = cx
-            .background_executor()
-            .spawn({
-                let path = payload_dir.path().to_owned();
-                async move { hash_directory_contents(&fs, &path).await }
-            })
-            .await?;
-        Ok((payload_dir, fingerprint))
-    }
-
-    async fn install_extension_on_remote(
-        this: &WeakEntity<Self>,
-        client: &WeakEntity<RemoteClient>,
-        missing_extension: &proto::Extension,
-        remote_tmp_dir: &str,
-        path_style: PathStyle,
-        prepared_payload: Option<tempfile::TempDir>,
-        cx: &mut AsyncApp,
-    ) -> Result<()> {
-        let already_prepared = prepared_payload.is_some();
-        let tmp_dir = match prepared_payload {
-            Some(payload_dir) => payload_dir,
-            None => {
-                cx.background_executor()
-                    .spawn(async move { tempfile::tempdir() })
-                    .await?
-            }
-        };
-        let result = Self::upload_extension_to_remote(
-            this,
-            client,
-            missing_extension,
-            remote_tmp_dir,
-            path_style,
-            tmp_dir.path().to_owned(),
-            already_prepared,
-            cx,
-        )
-        .await;
-        cx.background_executor()
-            .spawn(async move { drop(tmp_dir) })
-            .detach();
-        result
-    }
-
-    async fn upload_extension_to_remote(
-        this: &WeakEntity<Self>,
-        client: &WeakEntity<RemoteClient>,
-        missing_extension: &proto::Extension,
-        remote_tmp_dir: &str,
-        path_style: PathStyle,
-        local_dir: PathBuf,
-        already_prepared: bool,
-        cx: &mut AsyncApp,
-    ) -> Result<()> {
-        static UPLOAD_NONCE: AtomicU64 = AtomicU64::new(0);
-
-        if !already_prepared {
-            this.update(cx, |this, cx| {
-                this.prepare_remote_extension(
-                    missing_extension.id.clone().into(),
-                    missing_extension.dev,
-                    local_dir.clone(),
-                    cx,
-                )
-            })?
-            .await?;
-        }
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_nanos());
-        let upload_name = format!(
-            "{}-{}-{}-{}",
-            missing_extension.id,
-            std::process::id(),
-            UPLOAD_NONCE.fetch_add(1, AtomicOrdering::Relaxed),
-            timestamp,
-        );
-        let dest_dir = RemotePathBuf::new(
-            path_style
-                .join(remote_tmp_dir, &upload_name)
-                .with_context(|| {
-                    format!(
-                        "failed to construct destination path: {remote_tmp_dir:?}, {upload_name:?}"
-                    )
-                })?,
-            path_style,
-        );
-        log::info!(
-            "Uploading extension {} to {:?}",
-            missing_extension.id,
-            dest_dir
-        );
-
-        let upload = client.update(cx, |client, cx| {
-            client.upload_directory(local_dir, dest_dir.clone(), cx)
-        })?;
-        with_remote_sync_timeout(cx, REMOTE_SYNC_TIMEOUT, "uploading an extension", upload).await?;
-
-        log::info!("Finished uploading extension {}", missing_extension.id);
-
-        let install = client.update(cx, |client, _cx| {
-            client.proto_client().request(proto::InstallExtension {
-                tmp_dir: dest_dir.to_proto(),
-                extension: Some(missing_extension.clone()),
-            })
-        })?;
-        with_remote_sync_timeout(cx, REMOTE_SYNC_TIMEOUT, "installing an extension", install)
-            .await?;
-        Ok(())
-    }
-
-    pub fn register_remote_client(&mut self, client: Entity<RemoteClient>, cx: &mut Context<Self>) {
-        let entity_id = client.entity_id();
-        if self.remote_clients.contains_key(&entity_id) {
-            return;
-        }
-
-        let (dirty_tx, dirty_rx) = unbounded();
-
-        let event_subscription = cx.subscribe(&client, |store, client, event, _cx| match event {
-            RemoteClientEvent::Reconnected => {
-                if let Some(state) = store.remote_clients.get(&client.entity_id()) {
-                    state
-                        .dirty_tx
-                        .unbounded_send(RemoteSyncSignal::Reconnected)
-                        .ok();
-                }
-            }
-            RemoteClientEvent::Disconnected { .. } => {}
-        });
-        let release_subscription = cx.observe_release(&client, move |store, _client, _cx| {
-            store.remote_clients.remove(&entity_id);
-        });
-
-        let task = cx.spawn({
-            let client = client.downgrade();
-            let initial_index_load = self.initial_index_load.clone();
-            async move |this, cx| {
-                initial_index_load.await;
-                Self::reconcile_remote_client(this, client, dirty_rx, cx).await;
-            }
-        });
-
-        self.remote_clients.insert(
-            entity_id,
-            RemoteClientState {
-                dirty_tx,
-                _task: task,
-                _subscriptions: Subscription::join(event_subscription, release_subscription),
-            },
-        );
     }
 }
 

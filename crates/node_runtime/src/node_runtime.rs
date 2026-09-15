@@ -897,13 +897,21 @@ impl SystemNodeRuntime {
         let node = which::which("node")
             .or_else(|_| {
                 let p = PathBuf::from("/usr/bin/node");
-                if p.is_file() { Ok(p) } else { Err(which::Error::CannotFindBinaryPath) }
+                if p.is_file() {
+                    Ok(p)
+                } else {
+                    Err(which::Error::CannotFindBinaryPath)
+                }
             })
             .map_err(DetectError::NotInPath)?;
         let npm = which::which("npm")
             .or_else(|_| {
                 let p = PathBuf::from("/usr/bin/npm");
-                if p.is_file() { Ok(p) } else { Err(which::Error::CannotFindBinaryPath) }
+                if p.is_file() {
+                    Ok(p)
+                } else {
+                    Err(which::Error::CannotFindBinaryPath)
+                }
             })
             .map_err(DetectError::NotInPath)?;
         Self::new(node, npm).await.map_err(DetectError::Other)

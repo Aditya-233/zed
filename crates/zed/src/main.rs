@@ -25,23 +25,20 @@ use fs::{Fs, RealFs};
 use futures::{FutureExt, StreamExt, channel::oneshot};
 use git::GitHostingProviderRegistry;
 use git_ui::clone::clone_and_open;
-use gpui::{
-    App, AppContext, Application, AsyncApp, QuitMode, Task, TaskExt, UpdateGlobal as _,
-};
+use gpui::{App, AppContext, Application, AsyncApp, QuitMode, Task, TaskExt, UpdateGlobal as _};
 use gpui_platform;
 
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
 use onboarding::{FIRST_OPEN, show_onboarding_view};
 use project_panel::ProjectPanel;
-use remote::RemoteConnectionOptions;
 use reqwest_client::ReqwestClient;
 
+use crate::zed::{OpenRequestKind, eager_load_active_theme_and_icon_theme};
 use assets::Assets;
 use node_runtime::{NodeBinaryOptions, NodeRuntime};
 use parking_lot::Mutex;
 use project::{project_settings::ProjectSettings, trusted_worktrees};
-use recent_projects::{RemoteSettings, open_remote_project};
 use release_channel::{AppCommitSha, AppVersion, ReleaseChannel};
 use session::{AppSession, Session};
 use settings::{BaseKeymap, Settings, SettingsStore, watch_config_file};
@@ -61,16 +58,13 @@ use util::{ResultExt, maybe};
 use uuid::Uuid;
 use workspace::{
     AppState, MultiWorkspace, SerializedWorkspaceLocation, SessionWorkspace, Toast,
-    WorkspaceSettings, WorkspaceStore,
-    notifications::NotificationId,
-    restore_multiworkspace,
+    WorkspaceSettings, WorkspaceStore, notifications::NotificationId, restore_multiworkspace,
 };
 use zed::{
     OpenListener, OpenRequest, RawOpenRequest, app_menus, build_window_options,
-    derive_paths_with_position, handle_cli_connection,
-    handle_keymap_file_changes, initialize_workspace, open_paths_with_positions,
+    derive_paths_with_position, handle_cli_connection, handle_keymap_file_changes,
+    initialize_workspace, open_paths_with_positions,
 };
-use crate::zed::{OpenRequestKind, eager_load_active_theme_and_icon_theme};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -322,7 +316,7 @@ fn main() {
         .spawn(installation_id(KeyValueStore::from_app_db(&app_db)));
     let session_id = Uuid::new_v4().to_string();
     let session = app.background_executor().spawn(Session::new(
-        session_id.clone(),
+        session_id,
         KeyValueStore::from_app_db(&app_db),
     ));
 
@@ -333,21 +327,7 @@ fn main() {
     {
         false
     } else {
-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        {
-            crate::zed::listen_for_cli_connections(open_listener.clone()).is_err()
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            !crate::zed::windows_only_instance::handle_single_instance(open_listener.clone(), &args)
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            use zed::mac_only_instance::*;
-            ensure_only_instance() != IsOnlyInstance::Yes
-        }
+        crate::zed::listen_for_cli_connections(open_listener.clone()).is_err()
     };
     if failed_single_instance_check {
         println!("zed is already running");
@@ -582,9 +562,6 @@ fn main() {
             cx.background_executor().clone(),
         );
         command_palette::init(cx);
-        language_model::init(cx);
-        zed::remote_debug::init(cx);
-        web_search::init(cx);
         snippet_provider::init(cx);
 
         recent_projects::init(cx);
@@ -619,7 +596,6 @@ fn main() {
             },
             wrap_div_with_search_actions: search::buffer_search::register_pane_search_actions,
         });
-        vim::init(cx);
         terminal_view::init(cx);
         journal::init(app_state.clone(), cx);
         encoding_selector::init(cx);
@@ -641,7 +617,6 @@ fn main() {
         inspector_ui::init(app_state.clone(), cx);
         json_schema_store::init(cx);
         miniprofiler_ui::init(*STARTUP_TIME.get().unwrap(), cx);
-        which_key::init(cx);
 
         cx.observe_global::<SettingsStore>({
             let http = app_state.client.http_client();
@@ -870,22 +845,12 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 .detach_and_log_err(cx);
             }
             OpenRequestKind::AgentPanel { .. } => {
-                log::info!("zed://agent received but AI subsystem is disabled in this minimal build");
+                log::info!(
+                    "zed://agent received but AI subsystem is disabled in this minimal build"
+                );
             }
-            OpenRequestKind::InstallSkill { content } => {
-                cx.spawn(async move |cx| {
-                    let multi_workspace =
-                        workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
-
-                    multi_workspace.update(cx, |_multi_workspace, _window, cx| {
-                        settings_ui::open_skill_creator(
-                            settings_ui::pages::SkillCreatorOpenMode::Install { content },
-                            Some(multi_workspace),
-                            cx,
-                        );
-                    })
-                })
-                .detach_and_log_err(cx);
+            OpenRequestKind::InstallSkill { .. } => {
+                log::info!("zed://skill received but skills are disabled in this minimal build");
             }
             OpenRequestKind::DockMenuAction { index } => {
                 cx.perform_dock_menu_action(index);
@@ -1060,18 +1025,6 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
         return;
     }
 
-    if let Some(connection_options) = request.remote_connection {
-        let open_behavior = request.open_behavior;
-        let location = workspace::SerializedWorkspaceLocation::Remote(connection_options.clone());
-        let base_open_options = zed::open_options_for_request(open_behavior, &location, cx);
-        cx.spawn(async move |cx| {
-            let paths: Vec<PathBuf> = request.open_paths.into_iter().map(PathBuf::from).collect();
-            open_remote_project(connection_options, paths, app_state, base_open_options, cx).await
-        })
-        .detach_and_log_err(cx);
-        return;
-    }
-
     let mut task = None;
     let dev_container = request.dev_container;
     if !request.open_paths.is_empty() || !request.diff_paths.is_empty() {
@@ -1211,43 +1164,6 @@ pub(crate) async fn restore_or_create_workspace(
                     restore_multiworkspace(multi_workspace, app_state.clone(), cx)
                         .await
                         .map(|_| ())
-                }
-                SerializedWorkspaceLocation::Remote(connection_options) => {
-                    let mut connection_options = connection_options.clone();
-                    if let RemoteConnectionOptions::Ssh(options) = &mut connection_options {
-                        cx.update(|cx| {
-                            RemoteSettings::get_global(cx)
-                                .fill_connection_options_from_settings(options)
-                        });
-                    }
-
-                    let paths = multi_workspace
-                        .active_workspace
-                        .paths
-                        .paths()
-                        .iter()
-                        .map(PathBuf::from)
-                        .collect::<Vec<_>>();
-                    let state = multi_workspace.state.clone();
-                    async {
-                        let window = open_remote_project(
-                            connection_options,
-                            paths,
-                            app_state.clone(),
-                            workspace::OpenOptions::default(),
-                            cx,
-                        )
-                        .await?;
-                        workspace::apply_restored_multiworkspace_state(
-                            window,
-                            &state,
-                            app_state.fs.clone(),
-                            cx,
-                        )
-                        .await;
-                        Ok::<(), anyhow::Error>(())
-                    }
-                    .await
                 }
             };
 

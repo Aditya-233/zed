@@ -2447,20 +2447,21 @@ impl Pane {
             }
 
             if can_save {
-                let save_result = pane.update_in(cx, |pane, window, cx| {
-                    pane.unpreview_item_if_preview(item.item_id());
-                    item.save(
-                        SaveOptions {
-                            format: should_format,
-                            force_format,
-                            autosave: false,
-                        },
-                        project.clone(),
-                        window,
-                        cx,
-                    )
-                })?
-                .await;
+                let save_result = pane
+                    .update_in(cx, |pane, window, cx| {
+                        pane.unpreview_item_if_preview(item.item_id());
+                        item.save(
+                            SaveOptions {
+                                format: should_format,
+                                force_format,
+                                autosave: false,
+                            },
+                            project.clone(),
+                            window,
+                            cx,
+                        )
+                    })?
+                    .await;
 
                 if let Err(err) = save_result {
                     let is_perm_error = err.chain().any(|e| {

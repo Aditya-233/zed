@@ -55,9 +55,9 @@ use tokio::net::TcpStream;
 use url::Url;
 use util::{ConnectionResult, ResultExt};
 
+pub use self::telemetry::Event;
 pub use llm_token::*;
 pub use rpc::*;
-pub use self::telemetry::Event;
 pub use user::*;
 
 static ZED_SERVER_URL: LazyLock<Option<String>> =

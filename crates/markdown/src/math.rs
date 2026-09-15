@@ -1,15 +1,18 @@
 use collections::HashMap;
-use gpui::{AnyElement, Context, DevicePixels, Pixels, RenderImage, SvgSize, Task, StyledText, div, px, size};
+use gpui::{
+    AnyElement, Context, DevicePixels, Pixels, RenderImage, StyledText, SvgSize, Task, div, px,
+    size,
+};
+use ratex_types::display_item::{DisplayItem, DisplayList};
 use settings::Settings;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::{Arc, Mutex, OnceLock};
 use theme_settings::ThemeSettings;
 use ui::prelude::*;
-use ratex_types::display_item::{DisplayItem, DisplayList};
 
-use crate::parser::MarkdownEvent;
 use super::{Markdown, ParsedMarkdown};
+use crate::parser::MarkdownEvent;
 
 #[path = "math_svg.rs"]
 mod math_svg;
@@ -72,30 +75,73 @@ fn gpui_color_to_ratex(color: gpui::Hsla) -> ratex_types::color::Color {
 
 /// Replace every color in a DisplayList with the given color.
 /// This avoids re-parsing and re-laying-out LaTeX when only the theme color changes.
-fn recolor_display_list(display_list: &DisplayList, color: &ratex_types::color::Color) -> DisplayList {
+fn recolor_display_list(
+    display_list: &DisplayList,
+    color: &ratex_types::color::Color,
+) -> DisplayList {
     DisplayList {
-        items: display_list.items.iter().map(|item| match item {
-            DisplayItem::GlyphPath { x, y, scale, font, char_code, .. } => {
+        items: display_list
+            .items
+            .iter()
+            .map(|item| match item {
                 DisplayItem::GlyphPath {
-                    x: *x, y: *y, scale: *scale, font: font.clone(), char_code: *char_code, color: *color,
-                }
-            }
-            DisplayItem::Line { x, y, width, thickness, dashed, .. } => {
+                    x,
+                    y,
+                    scale,
+                    font,
+                    char_code,
+                    ..
+                } => DisplayItem::GlyphPath {
+                    x: *x,
+                    y: *y,
+                    scale: *scale,
+                    font: font.clone(),
+                    char_code: *char_code,
+                    color: *color,
+                },
                 DisplayItem::Line {
-                    x: *x, y: *y, width: *width, thickness: *thickness, dashed: *dashed, color: *color,
-                }
-            }
-            DisplayItem::Rect { x, y, width, height, .. } => {
+                    x,
+                    y,
+                    width,
+                    thickness,
+                    dashed,
+                    ..
+                } => DisplayItem::Line {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    thickness: *thickness,
+                    dashed: *dashed,
+                    color: *color,
+                },
                 DisplayItem::Rect {
-                    x: *x, y: *y, width: *width, height: *height, color: *color,
-                }
-            }
-            DisplayItem::Path { x, y, commands, fill, .. } => {
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } => DisplayItem::Rect {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                    color: *color,
+                },
                 DisplayItem::Path {
-                    x: *x, y: *y, commands: commands.clone(), fill: *fill, color: *color,
-                }
-            }
-        }).collect(),
+                    x,
+                    y,
+                    commands,
+                    fill,
+                    ..
+                } => DisplayItem::Path {
+                    x: *x,
+                    y: *y,
+                    commands: commands.clone(),
+                    fill: *fill,
+                    color: *color,
+                },
+            })
+            .collect(),
         width: display_list.width,
         height: display_list.height,
         depth: display_list.depth,
@@ -125,7 +171,12 @@ impl MathState {
         }
     }
 
-    pub(crate) fn update(&mut self, parsed: &ParsedMarkdown, font_size: f32, cx: &mut Context<Markdown>) {
+    pub(crate) fn update(
+        &mut self,
+        parsed: &ParsedMarkdown,
+        font_size: f32,
+        cx: &mut Context<Markdown>,
+    ) {
         self.font_size = font_size;
 
         // Compute the actual font ascent from GPUI metrics so inline math
@@ -140,7 +191,9 @@ impl MathState {
         };
         let text_system = cx.text_system();
         let font_id = text_system.resolve_font(&font);
-        self.text_ascent = text_system.ascent(font_id, Pixels::from(font_size)).as_f32();
+        self.text_ascent = text_system
+            .ascent(font_id, Pixels::from(font_size))
+            .as_f32();
 
         let mut new_order = Vec::new();
         for expr in parsed.math_expressions.values() {
@@ -172,10 +225,7 @@ fn render_svg_exact(
     let width = DevicePixels((svg.width.ceil() as i32).max(1));
     let height = DevicePixels((svg.height.ceil() as i32).max(1));
     svg_renderer
-        .render_parsed(
-            &parsed,
-            SvgSize::ExactSize(size(width, height)),
-        )
+        .render_parsed(&parsed, SvgSize::ExactSize(size(width, height)))
         .map_err(|e| anyhow::anyhow!("SVG render error: {}", e))
 }
 
@@ -229,7 +279,12 @@ impl CachedMathExpression {
         }
     }
 
-    fn recolor_and_render(&self, font_size: f32, text_color: gpui::Hsla, svg_renderer: gpui::SvgRenderer) {
+    fn recolor_and_render(
+        &self,
+        font_size: f32,
+        text_color: gpui::Hsla,
+        svg_renderer: gpui::SvgRenderer,
+    ) {
         let Some(Ok((display_list, _))) = self.display_tree.get() else {
             return;
         };
@@ -245,14 +300,10 @@ impl CachedMathExpression {
     }
 
     fn rendered_data(&self) -> Option<anyhow::Result<(Arc<RenderImage>, f32)>> {
-        self.rendered
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|r| match r {
-                Ok(mrr) => Ok((mrr.image.clone(), mrr.baseline_y)),
-                Err(e) => Err(anyhow::anyhow!("{:#}", e)),
-            })
+        self.rendered.lock().unwrap().as_ref().map(|r| match r {
+            Ok(mrr) => Ok((mrr.image.clone(), mrr.baseline_y)),
+            Err(e) => Err(anyhow::anyhow!("{:#}", e)),
+        })
     }
 }
 
@@ -411,7 +462,9 @@ mod tests {
         let parsed = parse_markdown_with_options(input, false, false, false);
         let events: Vec<_> = parsed.events.iter().map(|(_, e)| e.clone()).collect();
         // Should have: RootStart, Paragraph, Text, InlineMath, Text, Paragraph, RootEnd
-        let has_inline_math = events.iter().any(|e| matches!(e, MarkdownEvent::InlineMath(_)));
+        let has_inline_math = events
+            .iter()
+            .any(|e| matches!(e, MarkdownEvent::InlineMath(_)));
         let has_text = events.iter().any(|e| matches!(e, MarkdownEvent::Text));
         assert!(has_inline_math, "should have inline math");
         assert!(has_text, "should have surrounding text");

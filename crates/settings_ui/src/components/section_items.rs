@@ -23,6 +23,7 @@ impl SettingsSectionHeader {
         self
     }
 
+    #[allow(dead_code)]
     pub fn no_padding(mut self, no_padding: bool) -> Self {
         self.no_padding = no_padding;
         self

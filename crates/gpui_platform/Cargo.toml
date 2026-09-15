@@ -12,11 +12,10 @@ workspace = true
 path = "src/gpui_platform.rs"
 
 [features]
-default = []
+default = ["wayland"]
 bench-support = ["gpui/bench-support"]
 font-kit = []
 test-support = ["gpui/test-support"]
-screen-capture = ["gpui/screen-capture", "gpui_linux/screen-capture"]
 runtime_shaders = []
 wayland = ["gpui_linux/wayland"]
 

@@ -11,15 +11,16 @@ use http_client::{self, AsyncBody, HttpClientWithUrl, Method, Request};
 use parking_lot::Mutex;
 use regex::Regex;
 use release_channel::ReleaseChannel;
+use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
 use std::sync::LazyLock;
 use std::time::Instant;
 use std::{env, path::PathBuf, sync::Arc, time::Duration};
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
+use util::ResultExt;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EventRequestBody {
@@ -730,11 +731,15 @@ impl Telemetry {
         let mut state = self.state.lock();
         state.events_queue.clear();
         state.flush_events_task.take();
+        state.first_event_date_time.take();
         anyhow::Ok(())
     }
 
     pub fn flush_events(self: &Arc<Self>) -> Task<()> {
-        Task::ready(())
+        let this = self.clone();
+        self.executor.spawn(async move {
+            this.flush_events_inner().await.log_err();
+        })
     }
 }
 
@@ -759,10 +764,10 @@ mod tests {
     use super::*;
     use clock::FakeSystemClock;
 
+    use super::FlexibleEvent;
     use gpui::TestAppContext;
     use http_client::FakeHttpClient;
     use std::collections::HashMap;
-    use super::FlexibleEvent;
     use util::rel_path::RelPath;
     use worktree::{PathChange, ProjectEntryId, WorktreeId};
 

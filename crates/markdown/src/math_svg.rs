@@ -78,9 +78,7 @@ pub fn display_list_to_svg(display_list: &DisplayList, font_size: f32) -> MathSv
 
                 let ch = ratex_font::katex_ttf_glyph_char(font_id, *char_code);
 
-                if let Some(path_data) =
-                    resolve_glyph_path(font_id, ch, &fonts, &mut font_refs)
-                {
+                if let Some(path_data) = resolve_glyph_path(font_id, ch, &fonts, &mut font_refs) {
                     let fill = color_to_svg(color);
                     svg.push_str(&format!(
                         "<path d=\"{}\" fill=\"{}\" transform=\"translate({:.2},{:.2}) scale({:.4})\" />",
@@ -192,21 +190,21 @@ fn resolve_glyph_path<'a>(
     use ab_glyph::Font;
 
     let font_data = fonts.get(&font_id)?;
-    if !font_refs.contains_key(&font_id) {
-        if let Ok(font_ref) = ab_glyph::FontRef::try_from_slice(font_data) {
-            font_refs.insert(font_id, font_ref);
+    let font_ref = match font_refs.entry(font_id) {
+        std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+        std::collections::hash_map::Entry::Vacant(e) => {
+            let font_ref = ab_glyph::FontRef::try_from_slice(font_data).ok()?;
+            e.insert(font_ref)
         }
-    }
-    let font_ref = font_refs.get(&font_id)?;
+    };
 
     let glyph_id = font_ref.glyph_id(ch);
     if glyph_id.0 == 0 {
         return None;
     }
 
-    let outlines = ratex_font_loader::outline_cache::get_or_compute_outline(
-        font_id, font_ref, glyph_id,
-    )?;
+    let outlines =
+        ratex_font_loader::outline_cache::get_or_compute_outline(font_id, font_ref, glyph_id)?;
 
     let units_per_em = font_ref.units_per_em().unwrap_or(1000.0);
     let scale = 1000.0 / units_per_em;
@@ -259,15 +257,21 @@ fn resolve_glyph_path<'a>(
             OutlineCurve::Quad(_, p1, p2) => {
                 d.push_str(&format!(
                     " Q{:.2} {:.2} {:.2} {:.2}",
-                    p1.x * scale, -p1.y * scale, p2.x * scale, -p2.y * scale
+                    p1.x * scale,
+                    -p1.y * scale,
+                    p2.x * scale,
+                    -p2.y * scale
                 ));
             }
             OutlineCurve::Cubic(_, p1, p2, p3) => {
                 d.push_str(&format!(
                     " C{:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
-                    p1.x * scale, -p1.y * scale,
-                    p2.x * scale, -p2.y * scale,
-                    p3.x * scale, -p3.y * scale
+                    p1.x * scale,
+                    -p1.y * scale,
+                    p2.x * scale,
+                    -p2.y * scale,
+                    p3.x * scale,
+                    -p3.y * scale
                 ));
             }
         }
@@ -448,12 +452,6 @@ fn color_to_svg(color: &Color) -> String {
     if (a - 1.0).abs() < 0.01 {
         format!("#{:02x}{:02x}{:02x}", r, g, b)
     } else {
-        format!(
-            "rgba({},{},{},{:.2})",
-            r,
-            g,
-            b,
-            a
-        )
+        format!("rgba({},{},{},{:.2})", r, g, b, a)
     }
 }

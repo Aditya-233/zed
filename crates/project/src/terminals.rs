@@ -584,21 +584,14 @@ impl Project {
         &self,
         shell: &str,
         path: Option<Arc<Path>>,
-        remote_client: Option<Entity<RemoteClient>>,
+        _remote_client: Option<Entity<RemoteClient>>,
         cx: &mut App,
     ) -> Shared<Task<Option<HashMap<String, String>>>> {
         if let Some(path) = &path {
             let shell = Shell::Program(shell.to_string());
-            self.environment
-                .update(cx, |project_env, cx| match &remote_client {
-                    Some(remote_client) => project_env.remote_directory_environment(
-                        &shell,
-                        path.clone(),
-                        remote_client.clone(),
-                        cx,
-                    ),
-                    None => project_env.local_directory_environment(&shell, path.clone(), cx),
-                })
+            self.environment.update(cx, |project_env, cx| {
+                project_env.local_directory_environment(&shell, path.clone(), cx)
+            })
         } else {
             Task::ready(None).shared()
         }

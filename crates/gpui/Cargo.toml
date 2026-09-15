@@ -31,9 +31,6 @@ bench = ["bench-support"]
 inspector = ["gpui_macros/inspector"]
 leak-detection = ["backtrace"]
 wayland = []
-screen-capture = [
-    "scap",
-]
 profiler = ["dep:hdrhistogram"]
 stacker = ["dep:stacksafe"]
 
@@ -117,8 +114,6 @@ log.workspace = true
 objc2 = { workspace = true, optional = true }
 objc2-metal = { version = "0.3", optional = true }
 
-[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))'.dependencies]
-scap = { workspace = true, optional = true }
 
 
 

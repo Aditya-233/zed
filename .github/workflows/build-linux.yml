@@ -1,7 +1,10 @@
-name: Build Linux Package (No Titlebar)
+name: Build Linux Package & Arch Repo
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
   workflow_dispatch:
@@ -19,12 +22,12 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
 
 jobs:
-  build-linux-x86_64:
-    name: Build Linux x86_64 (No Titlebar)
+  ci-build:
+    name: Lint, Check, Test, Audit & Package
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Setup sccache
         uses: mozilla/sccache-action@v0.0.11
@@ -37,7 +40,6 @@ jobs:
           cache-targets: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-
       - name: Install System Dependencies
         run: |
           ./script/linux
@@ -46,37 +48,49 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
+          components: clippy, rustfmt
           targets: wasm32-wasip2, wasm32-unknown-unknown
 
-      - name: Build Zed Release Package
+      - name: Format Check
+        run: |
+          cargo fmt --all --check
+
+      - name: Check Workspace
+        run: |
+          cargo check --workspace --all-targets --all-features
+
+      - name: Clippy Workspace
+        run: |
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test Workspace
+        run: |
+          cargo test --workspace --all-features
+
+      - name: Cargo Audit
+        run: |
+          command -v cargo-audit || cargo install cargo-audit --locked
+          cargo audit
+
+      - name: Update Pacman Repo
         env:
           CC: clang
           CXX: clang++
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./script/bundle-linux
-
-      - name: Build Arch Linux Pacman Package & Repository
-        run: |
           sudo apt-get install -y libarchive-tools zstd
           ./script/package-arch
 
       - name: Upload Linux Tarball Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: zed-linux-x86_64-no-titlebar
+          name: zed-linux-x86_64
           path: target/release/zed-linux-x86_64.tar.gz
           if-no-files-found: warn
 
-      - name: Upload Compilation Timings Report
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: cargo-timing-report
-          path: target/**/cargo-timings/*.html
-          if-no-files-found: ignore
-
       - name: Upload Arch Linux Repository Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: zed-arch-repo
           path: target/release/arch-repo/*
@@ -94,4 +108,3 @@ jobs:
               --title "Custom Zed Arch Linux Repository" \
               --notes "Automated Pacman repository for custom minimal Zed on Arch Linux. Add this repository to /etc/pacman.conf to receive automated updates on 'pacman -Syu'."
           fi
-

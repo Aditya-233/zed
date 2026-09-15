@@ -38,6 +38,7 @@ pub struct ToolchainStore {
 
 enum ToolchainStoreInner {
     Local(Entity<LocalToolchainStore>),
+    #[allow(dead_code)]
     Remote(Entity<RemoteToolchainStore>),
 }
 
@@ -82,6 +83,7 @@ impl ToolchainStore {
         }
     }
 
+    #[allow(dead_code)]
     pub(super) fn remote(
         project_id: u64,
         worktree_store: Entity<WorktreeStore>,

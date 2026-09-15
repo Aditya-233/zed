@@ -2,8 +2,8 @@ mod encrypted_password;
 
 pub use encrypted_password::{EncryptedPassword, IKnowWhatIAmDoingAndIHaveReadTheDocs};
 
-use net::async_net::UnixListener;
 use smol::lock::Mutex;
+use smol::net::unix::UnixListener;
 #[cfg(not(target_os = "windows"))]
 use util::fs::make_file_executable;
 
@@ -432,8 +432,8 @@ pub fn main_from_args(socket: &str, args: impl IntoIterator<Item = String>) {
 }
 
 fn connect_and_write_prompt(socket: &str, mut buffer: Vec<u8>) {
-    use net::UnixStream;
     use std::io::{self, Read, Write};
+    use std::os::unix::net::UnixStream;
     use std::process::exit;
 
     let mut stream = match UnixStream::connect(socket) {

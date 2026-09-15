@@ -253,10 +253,8 @@ impl RemoteConnectionModal {
                 (options.distro_name.clone(), None, true, false)
             }
             RemoteConnectionOptions::Docker(options) => (options.name.clone(), None, false, true),
-            #[cfg(feature = "test-support")]
-            RemoteConnectionOptions::Mock(options) => {
-                (format!("mock-{}", options.id), None, false, false)
-            }
+            #[allow(unreachable_patterns)]
+            _ => ("unknown".to_string(), None, false, false),
         };
         Self {
             prompt: cx.new(|cx| {

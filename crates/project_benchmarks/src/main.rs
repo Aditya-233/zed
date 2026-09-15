@@ -1,10 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::anyhow;
-use askpass::EncryptedPassword;
 use clap::Parser;
 use client::{Client, UserStore};
-use futures::channel::oneshot;
 use gpui::AppContext as _;
 use gpui::TaskExt;
 use http_client::FakeHttpClient;
@@ -15,8 +13,6 @@ use project::{
     search::{SearchQuery, SearchResult},
 };
 use release_channel::ReleaseChannel;
-use remote::{ConnectionIdentifier, RemoteClientDelegate, SshConnectionOptions};
-use semver::Version;
 
 #[derive(Parser)]
 struct Args {
@@ -24,9 +20,6 @@ struct Args {
     worktrees: Vec<String>,
     #[clap(short)]
     query: Option<String>,
-    /// Askpass socket for SSH authentication
-    #[clap(long)]
-    askpass: Option<String>,
     /// Treat query as a regex.
     #[clap(short, long)]
     regex: bool,
@@ -39,66 +32,10 @@ struct Args {
     /// Include gitignored files in the search.
     #[clap(long)]
     include_ignored: bool,
-    #[clap(long)]
-    ssh: Option<String>,
 }
 
-struct BenchmarkRemoteClient;
-impl RemoteClientDelegate for BenchmarkRemoteClient {
-    fn ask_password(
-        &self,
-        prompt: String,
-        tx: oneshot::Sender<EncryptedPassword>,
-        _cancellation: oneshot::Receiver<()>,
-        _cx: &mut gpui::AsyncApp,
-    ) {
-        eprintln!("SSH asking for password: {}", prompt);
-        match rpassword::prompt_password(&prompt) {
-            Ok(password) => match EncryptedPassword::try_from(password.as_ref()) {
-                Ok(encrypted) => {
-                    if tx.send(encrypted).is_err() {
-                        eprintln!("Failed to send password");
-                    }
-                }
-                Err(e) => eprintln!("Failed to encrypt password: {e}"),
-            },
-            Err(e) => eprintln!("Failed to read password: {e}"),
-        }
-    }
-
-    fn get_download_url(
-        &self,
-        _platform: remote::RemotePlatform,
-        _release_channel: ReleaseChannel,
-        _version: Option<Version>,
-        _cx: &mut gpui::AsyncApp,
-    ) -> gpui::Task<gpui::Result<Option<String>>> {
-        unimplemented!()
-    }
-
-    fn download_server_binary_locally(
-        &self,
-        _platform: remote::RemotePlatform,
-        _release_channel: ReleaseChannel,
-        _version: Option<Version>,
-        _cx: &mut gpui::AsyncApp,
-    ) -> gpui::Task<gpui::Result<std::path::PathBuf>> {
-        unimplemented!()
-    }
-
-    fn set_status(&self, status: Option<&str>, _: &mut gpui::AsyncApp) {
-        if let Some(status) = status {
-            println!("SSH status: {status}");
-        }
-    }
-}
 fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
-
-    if let Some(socket) = &args.askpass {
-        askpass::main(socket);
-        return Ok(());
-    }
 
     let query_str = args
         .query
@@ -141,34 +78,22 @@ fn main() -> Result<(), anyhow::Error> {
 
 
             cx.spawn(async move |cx| {
-                let project = if let Some(ssh_target) = args.ssh {
-                    println!("Setting up SSH connection for {ssh_target}");
-                    let ssh_connection_options = SshConnectionOptions::parse_command_line(&ssh_target)?;
-
-                    let connection_options = remote::RemoteConnectionOptions::from(ssh_connection_options);
-                    let delegate = Arc::new(BenchmarkRemoteClient);
-                    let remote_connection = remote::connect(connection_options.clone(), delegate.clone(), cx).await.unwrap();
-
-                    let (_tx, rx) = oneshot::channel();
-                    let remote_client =  cx.update(|cx| remote::RemoteClient::new(ConnectionIdentifier::setup(), remote_connection, rx, delegate.clone(), cx )).await?.ok_or_else(|| anyhow!("ssh initialization returned None"))?;
-
-                    cx.update(|cx| Project::remote(remote_client,  client, node, user_store, registry, fs, false, cx))
-                } else {
-                    println!("Setting up local project");
-                    cx.update(|cx| Project::local(
-                    client,
-                    node,
-                    user_store,
-                    registry,
-                    fs,
-                    Some(Default::default()),
-                    project::LocalProjectFlags {
-                        init_worktree_trust: false,
-                        ..Default::default()
-                    },
-                    cx,
-                ))
-                };
+                println!("Setting up local project");
+                let project = cx.update(|cx| {
+                    Project::local(
+                        client,
+                        node,
+                        user_store,
+                        registry,
+                        fs,
+                        Some(Default::default()),
+                        project::LocalProjectFlags {
+                            init_worktree_trust: false,
+                            ..Default::default()
+                        },
+                        cx,
+                    )
+                });
                 println!("Loading worktrees");
                 let worktrees = project.update(cx, |this, cx| {
                     args.worktrees

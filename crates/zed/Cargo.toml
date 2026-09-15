@@ -22,7 +22,6 @@ tracy = ["ztracing/tracy"]
 track-project-leak = ["gpui/leak-detection"]
 test-support = [
     "gpui/test-support",
-    "gpui_platform/screen-capture",
     "dep:image",
     "workspace/test-support",
     "project/test-support",
@@ -97,7 +96,6 @@ json_schema_store.workspace = true
 keymap_editor.workspace = true
 language.workspace = true
 language_extension.workspace = true
-language_model.workspace = true
 language_onboarding.workspace = true
 language_selector.workspace = true
 language_tools.workspace = true
@@ -162,14 +160,9 @@ url.workspace = true
 urlencoding.workspace = true
 util.workspace = true
 uuid.workspace = true
-vim.workspace = true
-vim_mode_setting.workspace = true
 watch.workspace = true
-web_search.workspace = true
-which_key.workspace = true
 workspace.workspace = true
 zed_actions.workspace = true
-zed_credentials_provider.workspace = true
 zed_env_vars.workspace = true
 zlog.workspace = true
 zlog_settings.workspace = true

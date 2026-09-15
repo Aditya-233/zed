@@ -529,8 +529,6 @@
       "f11": "zed::ToggleFullScreen",
       "alt-ctrl-o": "projects::OpenRecent",
       "ctrl-r": "projects::OpenRecent",
-      "alt-shift-open": ["projects::OpenRemote", { "from_existing_connection": false}],
-      "alt-ctrl-shift-o": ["projects::OpenRemote", { "from_existing_connection": false}],
       "alt-ctrl-shift-b": "branches::OpenRecent",
       "alt-ctrl-shift-w": "git::Worktree",
       "alt-shift-enter": "toast::RunAction",
