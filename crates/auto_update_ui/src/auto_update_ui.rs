@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use agent_skills::GLOBAL_SKILLS_DIR_DISPLAY;
+const GLOBAL_SKILLS_DIR_DISPLAY: &str = "~/.agents/skills";
 use auto_update::{AutoUpdater, release_notes_url};
 use client::zed_urls;
 use db::kvp::Dismissable;

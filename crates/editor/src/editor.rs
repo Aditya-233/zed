@@ -69,6 +69,7 @@ mod completions;
 mod config;
 mod diagnostics;
 mod edit_prediction;
+pub mod edit_prediction_types;
 mod input;
 mod markdown_actions;
 mod navigation;
@@ -148,7 +149,6 @@ use code_context_menus::{
 use code_lens::CodeLensState;
 use collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use convert_case::{Case, Casing};
-use dap::TelemetrySpawnLocation;
 use display_map::*;
 use document_colors::LspColorData;
 use document_links::LspDocumentLinks;

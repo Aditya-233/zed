@@ -16,14 +16,11 @@ default = []
 test-support = []
 
 [dependencies]
-agent_settings.workspace = true
-agent_skills.workspace = true
 anyhow.workspace = true
 client.workspace = true
 cloud_api_types.workspace = true
 component.workspace = true
 collections.workspace = true
-context_server.workspace = true
 editor.workspace = true
 extension.workspace = true
 extension_host.workspace = true
@@ -37,7 +34,6 @@ http_client.workspace = true
 http_proxy.workspace = true
 itertools.workspace = true
 language.workspace = true
-language_model.workspace = true
 log.workspace = true
 menu.workspace = true
 paths.workspace = true

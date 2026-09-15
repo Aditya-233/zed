@@ -26,7 +26,7 @@ pub enum EditPredictionRequestTrigger {
     Other,
 }
 
-use icons::IconName;
+use ui::IconName;
 use language::{Anchor, Buffer, OffsetRangeExt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

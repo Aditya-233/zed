@@ -20,27 +20,14 @@ use http_proxy::{Allowlist, HostPattern, ProxyConfig, ProxyEvent, UpstreamProxy}
 #[cfg(target_os = "linux")]
 mod linux_bubblewrap;
 
-#[cfg(target_os = "macos")]
-mod macos_seatbelt;
-
-#[cfg(target_os = "windows")]
-mod windows_wsl;
-
 mod util;
 
-#[cfg(target_os = "macos")]
-use util::canonicalize_allowing_missing_leaf;
 #[cfg(target_os = "linux")]
 use util::{CanonicalPathBuf, linux_fd_identity};
 pub use util::{
     HostFilesystemLocation, HostFilesystemLocationDisplay, normalize_host_filesystem_locations,
     resolve_canonical,
 };
-#[cfg(target_os = "windows")]
-pub use windows_wsl::{ResolvedGrant, resolve_canonical_for_grant};
-
-#[cfg(target_os = "windows")]
-pub(crate) const WSL_SANDBOX_UNAVAILABLE_PREFIX: &str = "Windows sandboxing via WSL is unavailable";
 
 /// A path *inside the sandbox* — i.e. where a host location is exposed in the
 /// sandboxed process's view of the filesystem (for example, a bind-mount

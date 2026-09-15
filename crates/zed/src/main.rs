@@ -333,21 +333,7 @@ fn main() {
     {
         false
     } else {
-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        {
-            crate::zed::listen_for_cli_connections(open_listener.clone()).is_err()
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            !crate::zed::windows_only_instance::handle_single_instance(open_listener.clone(), &args)
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            use zed::mac_only_instance::*;
-            ensure_only_instance() != IsOnlyInstance::Yes
-        }
+        crate::zed::listen_for_cli_connections(open_listener.clone()).is_err()
     };
     if failed_single_instance_check {
         println!("zed is already running");
@@ -582,9 +568,7 @@ fn main() {
             cx.background_executor().clone(),
         );
         command_palette::init(cx);
-        language_model::init(cx);
         zed::remote_debug::init(cx);
-        web_search::init(cx);
         snippet_provider::init(cx);
 
         recent_projects::init(cx);
@@ -872,20 +856,8 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
             OpenRequestKind::AgentPanel { .. } => {
                 log::info!("zed://agent received but AI subsystem is disabled in this minimal build");
             }
-            OpenRequestKind::InstallSkill { content } => {
-                cx.spawn(async move |cx| {
-                    let multi_workspace =
-                        workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
-
-                    multi_workspace.update(cx, |_multi_workspace, _window, cx| {
-                        settings_ui::open_skill_creator(
-                            settings_ui::pages::SkillCreatorOpenMode::Install { content },
-                            Some(multi_workspace),
-                            cx,
-                        );
-                    })
-                })
-                .detach_and_log_err(cx);
+            OpenRequestKind::InstallSkill { .. } => {
+                log::info!("zed://skill received but skills are disabled in this minimal build");
             }
             OpenRequestKind::DockMenuAction { index } => {
                 cx.perform_dock_menu_action(index);

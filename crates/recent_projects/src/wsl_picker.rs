@@ -45,26 +45,7 @@ impl WslPickerDelegate {
 
 impl WslPickerDelegate {
     fn fetch_distros() -> anyhow::Result<Vec<String>> {
-        use anyhow::Context;
-        use windows_registry::CURRENT_USER;
-
-        let lxss_key = CURRENT_USER
-            .open("Software\\Microsoft\\Windows\\CurrentVersion\\Lxss")
-            .context("failed to get lxss wsl key")?;
-
-        let distros = lxss_key
-            .keys()
-            .context("failed to get wsl distros")?
-            .filter_map(|key| {
-                lxss_key
-                    .open(&key)
-                    .context("failed to open subkey for distro")
-                    .log_err()
-            })
-            .filter_map(|distro| distro.get_string("DistributionName").ok())
-            .collect::<Vec<_>>();
-
-        Ok(distros)
+        Ok(Vec::new())
     }
 }
 

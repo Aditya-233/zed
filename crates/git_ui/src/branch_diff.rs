@@ -6,7 +6,6 @@ use crate::{
         render_send_review_to_agent_button,
     },
 };
-use agent_settings::AgentSettings;
 use anyhow::{Context as _, Result, anyhow};
 use editor::{
     Addon, Editor, EditorEvent, HiddenDiffHunkRenderer, SplittableEditor,
@@ -25,7 +24,7 @@ use project::{
         diff_buffer_list::{self, DiffBase},
     },
 };
-use settings::{GitDiffBaseSetting, Settings};
+use settings::GitDiffBaseSetting;
 use std::{
     any::{Any, TypeId},
     sync::Arc,
@@ -796,7 +795,7 @@ impl Render for BranchDiffToolbar {
             .multibuffer()
             .read(cx)
             .is_empty();
-        let is_ai_enabled = AgentSettings::get_global(cx).enabled(cx);
+        let is_ai_enabled = false;
 
         let show_review_button = !is_multibuffer_empty && is_ai_enabled;
 

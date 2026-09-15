@@ -1,6 +1,5 @@
 use crate::merge_from::MergeFrom;
 use collections::HashMap;
-use language_model_core::ReasoningEffort;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings_macros::{MergeFrom, with_fallible_options};
@@ -394,7 +393,22 @@ pub struct OpenAiAvailableModel {
     pub capabilities: OpenAiModelCapabilities,
 }
 
-pub use language_model_core::ReasoningEffort as OpenAiReasoningEffort;
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::EnumString,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+pub use ReasoningEffort as OpenAiReasoningEffort;
 
 impl MergeFrom for OpenAiReasoningEffort {
     fn merge_from(&mut self, other: &Self) {
@@ -631,10 +645,29 @@ pub struct LanguageModelCacheConfiguration {
     pub min_total_token: u64,
 }
 
-pub use language_model_core::ModelMode;
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ModelMode {
+    #[default]
+    Default,
+    Thinking {
+        budget_tokens: Option<u32>,
+    },
+    Adaptive,
+}
 
 impl MergeFrom for ModelMode {
     fn merge_from(&mut self, other: &Self) {
         *self = *other;
     }
+}
+
+#[derive(
+    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Speed {
+    #[default]
+    Standard,
+    Fast,
 }

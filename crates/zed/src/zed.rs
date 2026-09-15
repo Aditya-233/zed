@@ -8,10 +8,6 @@ mod open_listener;
 mod open_url_modal;
 mod quick_action_bar;
 pub mod remote_debug;
-#[cfg(all(target_os = "macos", feature = "visual-tests"))]
-pub mod visual_tests;
-#[cfg(target_os = "windows")]
-pub(crate) mod windows_only_instance;
 
 use anyhow::Context as _;
 pub use app_menus::*;
@@ -5803,8 +5799,6 @@ mod tests {
             project_panel::init(cx);
             terminal_view::init(cx);
             image_viewer::init(cx);
-            language_model::init(cx);
-            web_search::init(cx);
 
             tasks_ui::init(cx);
             project::debugger::breakpoint_store::BreakpointStore::init(
