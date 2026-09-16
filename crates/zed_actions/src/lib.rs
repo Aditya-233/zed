@@ -649,19 +649,12 @@ pub mod assistant {
             #[action(deprecated_aliases = ["assistant::ToggleFocus"])]
             ToggleFocus,
             FocusAgent,
-            /// Opens the skill creator window for creating a new skill.
-            OpenSkillCreator,
-            /// Opens the skill creator window to import a skill from a GitHub URL.
-            CreateSkillFromUrl,
             /// Opens the user-global AGENTS.md rules file.
             #[action(name = "OpenGlobalAGENTS.mdRules")]
             OpenGlobalAgentsMdRules,
             /// Opens the project AGENTS.md rules file.
             #[action(name = "OpenProjectAGENTS.mdRules")]
             OpenProjectAgentsMdRules,
-            /// Opens the skills manager in the settings window.
-            #[action(deprecated_aliases = ["agent::OpenRulesLibrary", "assistant::OpenRulesLibrary", "assistant::DeployPromptLibrary"])]
-            ManageSkills,
         ]
     );
 

@@ -19,11 +19,17 @@ env:
   CARGO_BUILD_RUSTC_WRAPPER: sccache
   SCCACHE_GHA_ENABLED: "true"
   CARGO_INCREMENTAL: "0"
-  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  RUST_LOG: "error"
+  ZED_LOG: "error"
+  CARGO_PROFILE_DEV_DEBUG: "1"
+  CARGO_PROFILE_TEST_DEBUG: "1"
 
 jobs:
-  ci-build:
-    name: Lint, Check, Test, Audit & Package
+  # ========================================================
+  # Quality Gate: Format, Clippy, Nextest & Audit
+  # ========================================================
+  test-and-lint:
+    name: Lint, Clippy, Nextest & Audit
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -44,33 +50,69 @@ jobs:
         run: |
           ./script/linux
 
-      - name: Install Rust Toolchain
+      - name: Install Rust Toolchain & Nextest
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.1
           components: clippy, rustfmt
           targets: wasm32-wasip2, wasm32-unknown-unknown
+
+      - name: Install nextest & audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-audit
 
       - name: Format Check
         run: |
           cargo fmt --all --check
 
-      - name: Check Workspace
-        run: |
-          cargo check --workspace --all-targets --all-features
-
       - name: Clippy Workspace
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
           cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Test Workspace
+      - name: Test Workspace (Nextest)
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          cargo test --workspace --all-features
+          cargo nextest run --workspace --all-features
 
       - name: Cargo Audit
         run: |
-          command -v cargo-audit || cargo install cargo-audit --locked
           cargo audit
+
+  # ========================================================
+  # Parallel Packaging: Build Release & Arch Repo
+  # ========================================================
+  package-linux:
+    name: Build Release & Arch Repo
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.11
+        with:
+          version: "v0.10.0"
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install System Dependencies
+        run: |
+          ./script/linux
+          sudo apt-get install -y libarchive-tools zstd
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-wasip2, wasm32-unknown-unknown
 
       - name: Update Pacman Repo
         env:
@@ -79,7 +121,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./script/bundle-linux
-          sudo apt-get install -y libarchive-tools zstd
           ./script/package-arch
 
       - name: Upload Linux Tarball Artifact

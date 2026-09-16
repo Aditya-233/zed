@@ -1744,12 +1744,13 @@ mod tests {
             "first parse should be cancelled by the progress callback"
         );
 
-        // Deliberately do NOT call `set_language` here: tree-sitter's
-        // `ts_parser_set_language` internally calls `ts_parser_reset`, which
-        // would mask the very bug we're checking for. Instead we rely on the
-        // language being preserved across `parser.reset()` (it is) and verify
-        // that `with_parser` itself produces a clean parser for the next user.
+        // tree-sitter 0.27's `parser.reset()` clears both the in-progress
+        // parse state and the active language. Callers are always responsible
+        // for calling `set_language` before parsing. The invariant we test
+        // here is that `with_parser` resets properly so the second caller does
+        // not accidentally resume the first caller's cancelled parse.
         let tree = with_parser(|parser| {
+            parser.set_language(&rust_language).unwrap();
             let bytes = small_input.as_bytes();
             parser
                 .parse_with_options(

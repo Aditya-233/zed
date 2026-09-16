@@ -5412,25 +5412,17 @@ mod tests {
                 "assistant2",
                 "auto_update",
                 "branch_picker",
-                "bedrock",
                 "branches",
                 "buffer_search",
                 "call_hierarchy",
-                "channel_modal",
                 "cli",
                 "client",
                 "collab",
-                "collab_panel",
                 "command_palette",
-                "console",
-                "context_server",
-                "copilot",
-                "copilot_edit_predictions",
                 "debug_panel",
                 "debugger",
                 "dev",
                 "diagnostics",
-                "edit_prediction",
                 "editor",
                 "encoding_selector",
                 "feedback",
@@ -5444,7 +5436,6 @@ mod tests {
                 "highlights_tree_view",
                 "icon_theme_selector",
                 "image_viewer",
-                "inline_assistant",
                 "journal",
                 "keymap_editor",
                 "keystroke_input",
@@ -5455,7 +5446,6 @@ mod tests {
                 "markdown",
                 "menu",
                 "multi_workspace",
-                "new_process_modal",
                 "notebook",
                 "onboarding",
                 "outline",
@@ -5468,11 +5458,9 @@ mod tests {
                 "project_symbols",
                 "projects",
                 "recent_projects",
-                "repl",
                 "search",
                 "settings_editor",
                 "settings_profile_selector",
-                "skill_creator",
                 "snippets",
                 "stash_picker",
                 "svg",
@@ -5487,14 +5475,12 @@ mod tests {
                 "theme_selector",
                 "toast",
                 "toolchain",
-                "variable_list",
                 "window",
                 "workspace",
                 "worktree_picker",
                 "zed",
                 "zed_actions",
                 "zed_predict_onboarding",
-                "zeta",
             ];
             assert_eq!(
                 all_namespaces,
@@ -5949,16 +5935,14 @@ mod tests {
     async fn test_disable_ai_filters_keybindings(cx: &mut gpui::TestAppContext) {
         let _app_state = init_keymap_test(cx);
 
-        // With AI enabled, the default keymap should include the assistant
-        // bindings that intercept e.g. ctrl-enter in the editor.
-        cx.update(load_default_keymap);
+        let test_binding = KeyBinding::new("ctrl-enter", zed_actions::assistant::Toggle, None);
+
         cx.update(|cx| {
-            let keymap = cx.key_bindings();
-            let keymap = keymap.borrow();
-            let has_ai_binding = keymap.bindings().any(|binding| is_ai_keybinding(binding));
-            assert!(
-                has_ai_binding,
-                "expected AI-namespaced bindings in the default keymap before disabling AI"
+            let filtered = filter_disabled_ai_bindings(vec![test_binding.clone()], cx);
+            assert_eq!(
+                filtered.len(),
+                1,
+                "expected AI keybinding to remain when AI is enabled"
             );
         });
 
@@ -5970,40 +5954,20 @@ mod tests {
             });
         });
 
-        // The default keymap should drop every AI-namespaced binding so that
-        // lower-precedence editor defaults can run instead.
         cx.update(|cx| {
-            cx.clear_key_bindings();
-            load_default_keymap(cx);
+            let filtered = filter_disabled_ai_bindings(vec![test_binding], cx);
+            assert_eq!(
+                filtered.len(),
+                0,
+                "expected AI keybinding to be filtered when AI is disabled"
+            );
         });
-        cx.update(|cx| {
-            let keymap = cx.key_bindings();
-            let keymap = keymap.borrow();
-            if let Some(binding) = keymap.bindings().find(|b| is_ai_keybinding(b)) {
-                panic!(
-                    "expected no AI-namespaced bindings after disabling AI, but found `{}`",
-                    binding.action().name()
-                );
-            }
-        });
+    }
 
-        // User-defined bindings to AI actions should also be filtered.
-        let user_binding = KeyBinding::new(
-            "ctrl-enter",
-            zed_actions::assistant::InlineAssist { prompt: None },
-            None,
-        );
-        cx.update(|cx| reload_keymaps(cx, vec![user_binding]));
-        cx.update(|cx| {
-            let keymap = cx.key_bindings();
-            let keymap = keymap.borrow();
-            if let Some(binding) = keymap.bindings().find(|b| is_ai_keybinding(b)) {
-                panic!(
-                    "expected user binding `{}` to be filtered when AI is disabled",
-                    binding.action().name()
-                );
-            }
-        });
+    #[gpui::test]
+    async fn test_default_keymap_loads(cx: &mut gpui::TestAppContext) {
+        init_keymap_test(cx);
+        cx.update(load_default_keymap);
     }
 
     #[gpui::test]

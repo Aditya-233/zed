@@ -1471,23 +1471,6 @@
       "tab": "git_graph::FocusNextTabStop",
       "shift-tab": "git_graph::FocusPreviousTabStop"
     }
-  },
-  {
-    "context": "SkillCreator",
-    "bindings": {
-      "ctrl-w": "workspace::CloseWindow",
-      "ctrl-enter": "skill_creator::SaveSkill",
-      "tab": "skill_creator::FocusNextField",
-      "shift-tab": "skill_creator::FocusPreviousField"
-    }
-  },
-  {
-    "context": "SkillCreator > Editor",
-    "bindings": {
-      "ctrl-w": "workspace::CloseWindow",
-      "ctrl-enter": "skill_creator::SaveSkill",
-      "tab": "skill_creator::FocusNextField",
-      "shift-tab": "skill_creator::FocusPreviousField"
-    }
   }
 ]
+

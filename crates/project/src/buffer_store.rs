@@ -856,7 +856,7 @@ impl LocalBufferStore {
             let path = path.clone();
             let buffer = match load_file.await {
                 Ok(loaded) => {
-                    let is_writable = loaded.is_writable || loaded.file.is_local;
+                    let is_writable = loaded.is_writable;
                     let capability = if is_writable {
                         Capability::ReadWrite
                     } else {

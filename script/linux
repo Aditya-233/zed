@@ -28,6 +28,7 @@ if [[ -n $apt ]]; then
     libssl-dev
     libva-dev
     libvulkan1
+    mesa-vulkan-drivers
     libwayland-dev
     libxkbcommon-dev
     libzstd-dev

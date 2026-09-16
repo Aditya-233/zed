@@ -448,13 +448,6 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &OpenSettings, cx| {
         open_settings_editor(None, None, None, cx);
     });
-    cx.on_action(|_: &zed_actions::assistant::OpenSkillCreator, cx| {
-        open_skill_creator(pages::SkillCreatorOpenMode::Form, None, cx);
-    });
-    cx.on_action(|_: &zed_actions::assistant::CreateSkillFromUrl, cx| {
-        let initial_url = pages::skill_url_from_clipboard(cx);
-        open_skill_creator(pages::SkillCreatorOpenMode::Url { initial_url }, None, cx);
-    });
 
     cx.observe_new(|workspace: &mut workspace::Workspace, _, _| {
         workspace
@@ -493,24 +486,7 @@ pub fn init(cx: &mut App) {
                             .then_some(tree.read(cx).id())
                     });
                 open_settings_editor(None, target_worktree_id, window_handle, cx);
-            })
-            .register_action(
-                |_, _: &zed_actions::assistant::OpenSkillCreator, window, cx| {
-                    let window_handle = window.window_handle().downcast::<MultiWorkspace>();
-                    open_skill_creator(pages::SkillCreatorOpenMode::Form, window_handle, cx);
-                },
-            )
-            .register_action(
-                |_, _: &zed_actions::assistant::CreateSkillFromUrl, window, cx| {
-                    let window_handle = window.window_handle().downcast::<MultiWorkspace>();
-                    let initial_url = pages::skill_url_from_clipboard(cx);
-                    open_skill_creator(
-                        pages::SkillCreatorOpenMode::Url { initial_url },
-                        window_handle,
-                        cx,
-                    );
-                },
-            );
+            });
     })
     .detach();
 }
@@ -821,13 +797,6 @@ fn open_settings_editor_at_target(
             cx.notify();
         }
     });
-}
-
-pub fn open_skill_creator(
-    _open_mode: pages::SkillCreatorOpenMode,
-    _workspace_handle: Option<WindowHandle<MultiWorkspace>>,
-    _cx: &mut App,
-) {
 }
 
 fn open_settings_editor_with(

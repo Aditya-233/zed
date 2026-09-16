@@ -8,6 +8,7 @@ use gpui::{
 };
 use project::Project;
 pub use project::ProjectGroupKey;
+use settings::Settings;
 pub use settings::SidebarSide;
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -339,8 +340,9 @@ impl MultiWorkspace {
                 task.detach();
             }
         });
+        let initial_enabled = !project::DisableAiSettings::get_global(cx).disable_ai;
         let settings_subscription = cx.observe_global_in::<settings::SettingsStore>(window, {
-            let mut previous_multi_workspace_enabled = false;
+            let mut previous_multi_workspace_enabled = initial_enabled;
             move |this, window, cx| {
                 let multi_workspace_enabled = this.multi_workspace_enabled(cx);
                 if previous_multi_workspace_enabled && !multi_workspace_enabled {
@@ -413,8 +415,8 @@ impl MultiWorkspace {
             .map_or(false, |s| s.is_threads_list_view_active(cx))
     }
 
-    pub fn multi_workspace_enabled(&self, _cx: &App) -> bool {
-        false
+    pub fn multi_workspace_enabled(&self, cx: &App) -> bool {
+        !project::DisableAiSettings::get_global(cx).disable_ai
     }
 
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
