@@ -37,10 +37,13 @@ struct WgpuAtlasState {
     storage: WgpuAtlasStorage,
     tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
     pending_uploads: Vec<PendingUpload>,
+    next_texture_generation: u64,
 }
 
 pub struct WgpuTextureInfo {
     pub view: wgpu::TextureView,
+    /// Distinguishes new textures that reuse an [`AtlasTextureId`].
+    pub generation: u64,
 }
 
 impl WgpuAtlas {
@@ -58,6 +61,7 @@ impl WgpuAtlas {
             storage: WgpuAtlasStorage::default(),
             tiles_by_key: Default::default(),
             pending_uploads: Vec::new(),
+            next_texture_generation: 0,
         }))
     }
 
@@ -74,12 +78,13 @@ impl WgpuAtlas {
         lock.flush_uploads();
     }
 
-    pub fn get_texture_info(&self, id: AtlasTextureId) -> WgpuTextureInfo {
+    pub fn get_texture_info(&self, id: AtlasTextureId) -> Option<WgpuTextureInfo> {
         let lock = self.0.lock();
-        let texture = &lock.storage[id];
-        WgpuTextureInfo {
+        let texture = lock.storage.get(id)?;
+        Some(WgpuTextureInfo {
             view: texture.view.clone(),
-        }
+            generation: texture.generation,
+        })
     }
 
     /// Clears all cached textures and tiles, forcing them to be recreated.
@@ -217,12 +222,15 @@ impl WgpuAtlasState {
 
         let texture_list = &mut self.storage[kind];
         let index = texture_list.free_list.pop();
+        let generation = self.next_texture_generation;
+        self.next_texture_generation = self.next_texture_generation.wrapping_add(1);
 
         let atlas_texture = WgpuAtlasTexture {
             id: AtlasTextureId {
                 index: index.unwrap_or(texture_list.textures.len()) as u32,
                 kind,
             },
+            generation,
             allocator: BucketedAtlasAllocator::new(device_size_to_etagere(size)),
             format,
             texture,
@@ -345,6 +353,7 @@ impl ops::Index<AtlasTextureId> for WgpuAtlasStorage {
 
 struct WgpuAtlasTexture {
     id: AtlasTextureId,
+    generation: u64,
     allocator: BucketedAtlasAllocator,
     texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -514,6 +523,45 @@ mod tests {
         atlas.remove(&big_key_a);
         let tile_b = insert(&big_key_b, big);
         assert_eq!(tile_b.texture_id, keeper_tile.texture_id);
+        Ok(())
+    }
+
+    #[test]
+    fn reused_texture_id_has_new_generation() -> anyhow::Result<()> {
+        let (device, queue) = test_device_and_queue()?;
+        let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
+        let size = Size {
+            width: DevicePixels(700),
+            height: DevicePixels(700),
+        };
+        let make_key = |image_id| {
+            AtlasKey::Image(RenderImageParams {
+                image_id: ImageId(image_id),
+                frame_index: 0,
+            })
+        };
+        let insert = |key: &AtlasKey| {
+            atlas
+                .get_or_insert_with(key, &mut || {
+                    Ok(Some((
+                        size,
+                        Cow::Owned(vec![0; size.width.0 as usize * size.height.0 as usize * 4]),
+                    )))
+                })
+                .expect("allocation should succeed")
+                .expect("callback returns Some")
+        };
+
+        let first_key = make_key(1);
+        let first_tile = insert(&first_key);
+        let first_generation = atlas.get_texture_info(first_tile.texture_id).unwrap().generation;
+        atlas.remove(&first_key);
+
+        let second_tile = insert(&make_key(2));
+        let second_generation = atlas.get_texture_info(second_tile.texture_id).unwrap().generation;
+
+        assert_eq!(second_tile.texture_id, first_tile.texture_id);
+        assert_ne!(second_generation, first_generation);
         Ok(())
     }
 
