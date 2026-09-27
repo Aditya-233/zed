@@ -111,9 +111,5 @@ zlog.workspace = true
 criterion.workspace = true
 theme_settings.workspace = true
 
-[[bench]]
-name = "highlight_map"
-harness = false
-
 [package.metadata.cargo-shear]
 ignored = ["tracing"]

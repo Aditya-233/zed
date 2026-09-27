@@ -5,7 +5,6 @@ members = [
     "crates/activity_indicator",
     "crates/askpass",
     "crates/assets",
-    "crates/benchmarks",
     "crates/breadcrumbs",
     "crates/buffer_diff",
     "crates/call_hierarchy",
@@ -22,9 +21,7 @@ members = [
     "crates/dap",
     "crates/db",
     "crates/diagnostics",
-    "crates/docs_preprocessor",
     "crates/editor",
-    "crates/editor_benchmarks",
     "crates/encoding_selector",
     "crates/env_var",
     "crates/extension",
@@ -37,7 +34,6 @@ members = [
     "crates/file_finder",
     "crates/file_icons",
     "crates/fs",
-    "crates/fs_benchmarks",
     "crates/fuzzy",
     "crates/fuzzy_nucleo",
     "crates/git",
@@ -90,7 +86,6 @@ members = [
     "crates/picker_preview",
     "crates/prettier",
     "crates/project",
-    "crates/project_benchmarks",
     "crates/project_panel",
     "crates/project_symbols",
     "crates/proto",
@@ -148,7 +143,6 @@ members = [
     "crates/watch",
     "crates/workspace",
     "crates/worktree",
-    "crates/worktree_benchmarks",
     "crates/zed",
     "crates/zed_actions",
     "crates/zed_credentials_provider",
@@ -166,14 +160,6 @@ members = [
     "extensions/html",
     "extensions/proto",
     "extensions/test-extension",
-
-    #
-    # Tooling
-    #
-
-    "tooling/compliance",
-    "tooling/perf",
-    "tooling/xtask",
 ]
 default-members = ["crates/zed"]
 
@@ -202,7 +188,6 @@ cloud_api_types = { path = "crates/cloud_api_types" }
 collections = { path = "crates/collections", version = "0.1.0" }
 command_palette = { path = "crates/command_palette" }
 command_palette_hooks = { path = "crates/command_palette_hooks" }
-compliance = { path = "tooling/compliance" }
 component = { path = "crates/component" }
 credentials_provider = { path = "crates/credentials_provider" }
 dap = { path = "crates/dap" }
@@ -268,7 +253,6 @@ outline = { path = "crates/outline" }
 panel = { path = "crates/panel" }
 path = { path = "crates/path" }
 paths = { path = "crates/paths" }
-perf = { path = "tooling/perf" }
 picker = { path = "crates/picker" }
 picker_preview = { path = "crates/picker_preview" }
 prettier = { path = "crates/prettier" }

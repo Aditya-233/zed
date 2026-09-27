@@ -52,8 +52,6 @@ extend-exclude = [
     "crates/editor/src/hover_links.rs",
     # typos-cli doesn't understand `setis` is intentional test case
     "crates/editor/src/code_completion_tests.rs",
-    # Linux repository structure is not a valid text, hence we should not check it for typos
-    "crates/project_panel/benches/linux_repo_snapshot.txt",
     # Some multibuffer test cases have word fragments that register as typos
     "crates/multi_buffer/src/multi_buffer_tests.rs",
     # Tests contain partially incomplete words (by design)

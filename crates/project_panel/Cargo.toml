@@ -8,10 +8,6 @@ license = "GPL-3.0-or-later"
 [lints]
 workspace = true
 
-[[bench]]
-name = "sorting"
-harness = false
-
 [lib]
 path = "src/project_panel.rs"
 doctest = false
