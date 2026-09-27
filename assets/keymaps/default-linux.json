@@ -543,10 +543,6 @@
       "shift-new": "workspace::NewWindow",
       "ctrl-shift-n": "workspace::NewWindow",
       "ctrl-`": "terminal_panel::Toggle",
-      "f10": [
-        "app_menu::OpenApplicationMenu",
-        "Zed"
-      ],
       "alt-1": [
         "workspace::ActivatePane",
         0
@@ -658,14 +654,6 @@
     "context": "Workspace && debugger_running",
     "bindings": {
       "f5": null
-    }
-  },
-  {
-    "context": "ApplicationMenu",
-    "bindings": {
-      "f10": "menu::Cancel",
-      "left": "app_menu::ActivateMenuLeft",
-      "right": "app_menu::ActivateMenuRight"
     }
   },
   {

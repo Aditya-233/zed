@@ -81,12 +81,12 @@ use uuid::Uuid;
 use workspace::notifications::{NotificationId, dismiss_app_notification, show_app_notification};
 
 use workspace::{
-    AppState, MultiWorkspace, NewFile, NewWindow, OpenLog, Toast, Workspace, WorkspaceSettings,
+    AppState, MultiWorkspace, NewFile, NewWindow, OpenLog, Workspace, WorkspaceSettings,
     create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
     open_new,
 };
 use workspace::{CloseProject, CloseWindow, with_active_or_new_workspace};
-use workspace::{Pane, notifications::DetachAndPromptErr};
+use workspace::Pane;
 use zed_actions::{
     About, GetMerch, OpenAccountSettings, OpenBrowser, OpenDocs, OpenProjectTasks,
     OpenServerSettings, OpenSettingsFile, OpenStatusPage, OpenZedUrl, Quit,
@@ -5359,14 +5359,12 @@ mod tests {
                 "activity_indicator",
                 "agent",
                 "agents_sidebar",
-                "app_menu",
                 "assistant",
                 "assistant2",
                 "branch_picker",
                 "branches",
                 "buffer_search",
                 "call_hierarchy",
-                "cli",
                 "client",
                 "collab",
                 "command_palette",
@@ -5424,7 +5422,6 @@ mod tests {
                 "theme_selector",
                 "toast",
                 "toolchain",
-                "window",
                 "workspace",
                 "worktree_picker",
                 "zed",

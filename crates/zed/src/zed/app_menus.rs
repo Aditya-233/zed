@@ -1,10 +1,9 @@
 use gpui::{App, Menu, MenuItem, OsAction};
-use release_channel::ReleaseChannel;
 use terminal_view::terminal_panel;
-use zed_actions::{Quit, dev, git_panel, project_panel};
+use zed_actions::{Quit, git_panel, project_panel};
 
-pub fn app_menus(cx: &mut App) -> Vec<Menu> {
-    let mut view_items = vec![
+pub fn app_menus(_cx: &mut App) -> Vec<Menu> {
+    let view_items = vec![
         MenuItem::action(
             "Zoom In",
             zed_actions::IncreaseBufferFontSize { persist: false },
