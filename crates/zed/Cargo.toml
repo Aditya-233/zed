@@ -14,7 +14,6 @@ workspace = true
 [features]
 inspector = [
     "gpui/inspector",
-    "inspector_ui/inspector",
     "ui/derive_inspector_reflection",
 ]
 tracy = ["ztracing/tracy"]
@@ -29,7 +28,6 @@ test-support = [
     "terminal_view/test-support",
     "image_viewer/test-support",
     "recent_projects/test-support",
-    "title_bar/test-support",
 ]
 
 [[bin]]
@@ -42,8 +40,6 @@ activity_indicator.workspace = true
 anyhow.workspace = true
 askpass.workspace = true
 assets.workspace = true
-auto_update.workspace = true
-auto_update_ui.workspace = true
 breadcrumbs.workspace = true
 call_hierarchy.workspace = true
 chrono.workspace = true
@@ -53,7 +49,6 @@ client.workspace = true
 clock = { workspace = true, optional = true }
 collections.workspace = true
 command_palette.workspace = true
-component_preview.workspace = true
 db.workspace = true
 diagnostics.workspace = true
 editor.workspace = true
@@ -89,14 +84,11 @@ tempfile = { workspace = true, optional = true }
 http_client.workspace = true
 image_viewer.workspace = true
 input_latency_ui.workspace = true
-inspector_ui.workspace = true
-install_cli.workspace = true
 journal.workspace = true
 json_schema_store.workspace = true
 keymap_editor.workspace = true
 language.workspace = true
 language_extension.workspace = true
-language_onboarding.workspace = true
 language_selector.workspace = true
 language_tools.workspace = true
 languages = { workspace = true, features = ["load-grammars"] }
@@ -108,10 +100,8 @@ markdown_preview.workspace = true
 menu.workspace = true
 migrator.workspace = true
 mimalloc = { version = "0.1", default-features = false }
-miniprofiler_ui.workspace = true
 node_runtime.workspace = true
 notifications.workspace = true
-onboarding.workspace = true
 outline.workspace = true
 parking_lot.workspace = true
 paths.workspace = true
@@ -134,7 +124,6 @@ serde_json.workspace = true
 session.workspace = true
 settings.workspace = true
 settings_profile_selector.workspace = true
-settings_ui.workspace = true
 shellexpand.workspace = true
 smol.workspace = true
 snippet_provider.workspace = true
@@ -151,7 +140,6 @@ theme_selector.workspace = true
 theme_settings.workspace = true
 time.workspace = true
 time_format.workspace = true
-title_bar.workspace = true
 toolchain_selector.workspace = true
 tracing.workspace = true
 ui.workspace = true
@@ -193,7 +181,6 @@ project = { workspace = true, features = ["test-support"] }
 remote = { workspace = true, features = ["test-support"] }
 semver.workspace = true
 terminal_view = { workspace = true, features = ["test-support"] }
-title_bar = { workspace = true, features = ["test-support"] }
 workspace = { workspace = true, features = ["test-support"] }
 image.workspace = true
 search = { workspace = true, features = ["test-support"] }

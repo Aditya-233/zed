@@ -36,13 +36,11 @@ use gpui::{
 };
 use image_viewer::ImageInfo;
 use language::Capability;
-use language_onboarding::BasedPyrightBanner;
 use language_tools::lsp_button::{self, LspButton};
 use language_tools::lsp_log_view::LspLogToolbarItemView;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use migrate::{MigrationBanner, MigrationEvent, MigrationNotification, MigrationType};
 use migrator::migrate_keymap;
-use onboarding::multibuffer_hint::MultibufferHint;
 pub use open_listener::*;
 use paths::{
     local_debug_file_relative_path, local_settings_file_relative_path,
@@ -87,7 +85,7 @@ use workspace::{
     create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
     open_new,
 };
-use workspace::{CloseProject, CloseWindow, RestoreBanner, with_active_or_new_workspace};
+use workspace::{CloseProject, CloseWindow, with_active_or_new_workspace};
 use workspace::{Pane, notifications::DetachAndPromptErr};
 use zed_actions::{
     About, GetMerch, OpenAccountSettings, OpenBrowser, OpenDocs, OpenProjectTasks,
@@ -177,8 +175,6 @@ pub fn init(cx: &mut App) {
     #[cfg(target_os = "macos")]
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(quit);
-
-    cx.on_action(|_: &RestoreBanner, cx| title_bar::restore_banner(cx));
 
     cx.observe_flag::<PanicFeatureFlag, _>({
         let mut added = false;
@@ -1009,32 +1005,6 @@ fn register_actions(
                 }
             }
         })
-        .register_action(|_, _: &install_cli::RegisterZedScheme, window, cx| {
-            cx.spawn_in(window, async move |workspace, cx| {
-                install_cli::register_zed_scheme(cx).await?;
-                workspace.update_in(cx, |workspace, _, cx| {
-                    struct RegisterZedScheme;
-
-                    workspace.show_toast(
-                        Toast::new(
-                            NotificationId::unique::<RegisterZedScheme>(),
-                            format!(
-                                "zed:// links will now open in {}.",
-                                ReleaseChannel::global(cx).display_name()
-                            ),
-                        ),
-                        cx,
-                    )
-                })?;
-                Ok(())
-            })
-            .detach_and_prompt_err(
-                "Error registering zed:// scheme",
-                window,
-                cx,
-                |_, _, _| None,
-            );
-        })
         .register_action(open_project_settings_file)
         .register_action(open_project_tasks_file)
         .register_action(open_worktree_setup_tasks_file)
@@ -1100,9 +1070,6 @@ fn register_actions(
                 .detach_and_log_err(cx);
             }
         });
-
-    #[cfg(not(target_os = "windows"))]
-    workspace.register_action(install_cli);
 
     if workspace.project().read(cx).is_via_remote_server() {
         workspace.register_action({
@@ -1185,8 +1152,6 @@ fn initialize_pane(
     let workspace_handle = cx.weak_entity();
     pane.update(cx, |pane, cx| {
         pane.toolbar().update(cx, |toolbar, cx| {
-            let multibuffer_hint = cx.new(|_| MultibufferHint::new());
-            toolbar.add_item(multibuffer_hint, window, cx);
             let solo_diff_style_toolbar = cx.new(SoloDiffStyleToolbar::new);
             toolbar.add_item(solo_diff_style_toolbar, window, cx);
             let breadcrumbs = cx.new(|_| Breadcrumbs::new());
@@ -1228,8 +1193,6 @@ fn initialize_pane(
             toolbar.add_item(solo_diff_git_toolbar, window, cx);
             let commit_view_toolbar = cx.new(|_| CommitViewToolbar::new());
             toolbar.add_item(commit_view_toolbar, window, cx);
-            let basedpyright_banner = cx.new(|cx| BasedPyrightBanner::new(workspace, cx));
-            toolbar.add_item(basedpyright_banner, window, cx);
             let image_view_toolbar = cx.new(|_| image_viewer::ImageViewToolbarControls::new());
             toolbar.add_item(image_view_toolbar, window, cx);
         })
@@ -1448,16 +1411,6 @@ fn open_about_window(cx: &mut App) {
         },
     )
     .log_err();
-}
-
-#[cfg(not(target_os = "windows"))]
-fn install_cli(
-    _: &mut Workspace,
-    _: &install_cli::InstallCliBinary,
-    window: &mut Window,
-    cx: &mut Context<Workspace>,
-) {
-    install_cli::install_cli_binary(window, cx)
 }
 
 static WAITING_QUIT_CONFIRMATION: AtomicBool = AtomicBool::new(false);
@@ -5016,7 +4969,6 @@ mod tests {
             theme_settings::init(theme::LoadThemes::JustBase, cx);
             client::init(&app_state.client, cx);
             workspace::init(app_state.clone(), cx);
-            onboarding::init(cx);
             app_state
         })
     }
@@ -5410,7 +5362,6 @@ mod tests {
                 "app_menu",
                 "assistant",
                 "assistant2",
-                "auto_update",
                 "branch_picker",
                 "branches",
                 "buffer_search",
@@ -5447,7 +5398,6 @@ mod tests {
                 "menu",
                 "multi_workspace",
                 "notebook",
-                "onboarding",
                 "outline",
                 "outline_panel",
                 "pane",
@@ -5459,7 +5409,6 @@ mod tests {
                 "projects",
                 "recent_projects",
                 "search",
-                "settings_editor",
                 "settings_profile_selector",
                 "snippets",
                 "stash_picker",

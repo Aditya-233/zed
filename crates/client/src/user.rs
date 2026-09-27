@@ -7,9 +7,29 @@ use cloud_api_client::{
     UpdateSystemSettingsBody,
 };
 use cloud_api_types::OrganizationConfiguration;
-use cloud_llm_client::{
-    EDIT_PREDICTIONS_USAGE_AMOUNT_HEADER_NAME, EDIT_PREDICTIONS_USAGE_LIMIT_HEADER_NAME, UsageLimit,
-};
+#[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageLimit {
+    Limited(i32),
+    Unlimited,
+}
+
+impl std::str::FromStr for UsageLimit {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "unlimited" => Ok(Self::Unlimited),
+            limit => limit
+                .parse::<i32>()
+                .map(Self::Limited)
+                .context("failed to parse limit"),
+        }
+    }
+}
+
+pub const EDIT_PREDICTIONS_USAGE_LIMIT_HEADER_NAME: &str = "x-zed-edit-predictions-usage-limit";
+pub const EDIT_PREDICTIONS_USAGE_AMOUNT_HEADER_NAME: &str = "x-zed-edit-predictions-usage-amount";
 use collections::{HashMap, HashSet, hash_map::Entry};
 use derive_more::Deref;
 use feature_flags::FeatureFlagAppExt;

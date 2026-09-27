@@ -32,7 +32,6 @@ mod tests {
         ("search", "git_ui"),
         ("search", "project_panel"),
         ("sidebar", "git_ui"),
-        ("title_bar", "git_ui"),
     ];
 
     #[test]

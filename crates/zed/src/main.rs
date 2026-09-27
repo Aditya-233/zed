@@ -18,7 +18,7 @@ use clap::Parser;
 use cli::FORCE_CLI_MODE_ENV_VAR_NAME;
 use client::{Client, ProxySettings, UserStore, parse_zed_link};
 use collections::HashMap;
-use db::kvp::{GlobalKeyValueStore, KeyValueStore};
+use db::kvp::KeyValueStore;
 use editor::Editor;
 use extension::ExtensionHostProxy;
 use fs::{Fs, RealFs};
@@ -30,7 +30,6 @@ use gpui_platform;
 
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
-use onboarding::{FIRST_OPEN, show_onboarding_view};
 use project_panel::ProjectPanel;
 use reqwest_client::ReqwestClient;
 
@@ -310,10 +309,6 @@ fn main() {
         .with_restart_arguments(restart_arguments);
 
     let app_db = db::AppDatabase::new();
-    let system_id = app.background_executor().spawn(system_id());
-    let installation_id = app
-        .background_executor()
-        .spawn(installation_id(KeyValueStore::from_app_db(&app_db)));
     let session_id = Uuid::new_v4().to_string();
     let session = app.background_executor().spawn(Session::new(
         session_id,
@@ -503,33 +498,15 @@ fn main() {
         client::init(&client, cx);
         feature_flags::FeatureFlagStore::init(cx);
 
-        let system_id = cx.foreground_executor().block_on(system_id).ok();
-        let installation_id = cx.foreground_executor().block_on(installation_id).ok();
         let session = cx.foreground_executor().block_on(session);
 
         let telemetry = client.telemetry();
         telemetry.start(
-            system_id.as_ref().map(|id| id.to_string()),
-            installation_id.as_ref().map(|id| id.to_string()),
+            None,
+            None,
             session.id().to_owned(),
             cx,
         );
-
-        // We should rename these in the future to `first app open`, `first app open for release channel`, and `app open`
-        if let (Some(system_id), Some(installation_id)) = (&system_id, &installation_id) {
-            match (&system_id, &installation_id) {
-                (IdType::New(_), IdType::New(_)) => {
-                    telemetry::event!("App First Opened");
-                    telemetry::event!("App First Opened For Release Channel");
-                }
-                (IdType::Existing(_), IdType::New(_)) => {
-                    telemetry::event!("App First Opened For Release Channel");
-                }
-                (_, IdType::Existing(_)) => {
-                    telemetry::event!("App Opened");
-                }
-            }
-        }
         let app_session = cx.new(|cx| AppSession::new(session, cx));
 
         let app_state = Arc::new(AppState {
@@ -544,8 +521,6 @@ fn main() {
         });
         AppState::set_global(app_state.clone(), cx);
 
-        auto_update::init(client.clone(), cx);
-        auto_update_ui::init(cx);
         extension_host::init(
             extension_host_proxy.clone(),
             app_state.fs.clone(),
@@ -610,13 +585,9 @@ fn main() {
         markdown_preview::init(cx);
         tabular_data_preview::init(cx);
         svg_preview::init(cx);
-        onboarding::init(cx);
-        settings_ui::init(cx);
         keymap_editor::init(cx);
         extensions_ui::init(cx);
-        inspector_ui::init(app_state.clone(), cx);
         json_schema_store::init(cx);
-        miniprofiler_ui::init(*STARTUP_TIME.get().unwrap(), cx);
 
         cx.observe_global::<SettingsStore>({
             let http = app_state.client.http_client();
@@ -787,8 +758,6 @@ fn main() {
         .detach_and_log_err(cx);
 
         let app_state = app_state.clone();
-
-        component_preview::init(app_state.clone(), cx);
 
         cx.spawn(async move |cx| {
             let _first_window_subscription = _first_window_subscription;
@@ -1114,48 +1083,10 @@ async fn authenticate(client: Arc<Client>, cx: &AsyncApp) -> Result<()> {
     Ok(())
 }
 
-async fn system_id() -> Result<IdType> {
-    let key_name = "system_id".to_string();
-    let db = GlobalKeyValueStore::global();
-
-    if let Ok(Some(system_id)) = db.read_kvp(&key_name) {
-        return Ok(IdType::Existing(system_id));
-    }
-
-    let system_id = Uuid::new_v4().to_string();
-
-    db.write_kvp(key_name, system_id.clone()).await?;
-
-    Ok(IdType::New(system_id))
-}
-
-async fn installation_id(db: KeyValueStore) -> Result<IdType> {
-    let legacy_key_name = "device_id".to_string();
-    let key_name = "installation_id".to_string();
-
-    // Migrate legacy key to new key
-    if let Ok(Some(installation_id)) = db.read_kvp(&legacy_key_name) {
-        db.write_kvp(key_name, installation_id.clone()).await?;
-        db.delete_kvp(legacy_key_name).await?;
-        return Ok(IdType::Existing(installation_id));
-    }
-
-    if let Ok(Some(installation_id)) = db.read_kvp(&key_name) {
-        return Ok(IdType::Existing(installation_id));
-    }
-
-    let installation_id = Uuid::new_v4().to_string();
-
-    db.write_kvp(key_name, installation_id.clone()).await?;
-
-    Ok(IdType::New(installation_id))
-}
-
 pub(crate) async fn restore_or_create_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<()> {
-    let kvp = cx.update(|cx| KeyValueStore::global(cx));
     if let Some(multi_workspaces) = restorable_workspaces(cx, &app_state).await {
         let mut error_count = 0;
         for multi_workspace in multi_workspaces {
@@ -1248,8 +1179,6 @@ pub(crate) async fn restore_or_create_workspace(
             })
             .await?;
         }
-    } else if matches!(kvp.read_kvp(FIRST_OPEN), Ok(None)) {
-        cx.update(|cx| show_onboarding_view(app_state, cx)).await?;
     } else {
         cx.update(|cx| {
             workspace::open_new(
@@ -1464,20 +1393,6 @@ struct Args {
     /// Output current environment variables as JSON to stdout
     #[arg(long, hide = true)]
     printenv: bool,
-}
-
-#[derive(Clone, Debug)]
-enum IdType {
-    New(String),
-    Existing(String),
-}
-
-impl ToString for IdType {
-    fn to_string(&self) -> String {
-        match self {
-            IdType::New(id) | IdType::Existing(id) => id.clone(),
-        }
-    }
 }
 
 fn parse_url_arg(arg: &str, cx: &App) -> String {

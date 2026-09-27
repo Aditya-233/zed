@@ -45,21 +45,12 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
         MenuItem::separator(),
     ];
 
-    if ReleaseChannel::try_global(cx) == Some(ReleaseChannel::Dev) {
-        view_items.push(MenuItem::action(
-            "Toggle GPUI Inspector",
-            dev::ToggleInspector,
-        ));
-        view_items.push(MenuItem::separator());
-    }
-
     vec![
         Menu {
             name: "Zed".into(),
             disabled: false,
             items: vec![
                 MenuItem::action("About Zed", zed_actions::About),
-                MenuItem::action("Check for Updates", auto_update::Check),
                 MenuItem::separator(),
                 MenuItem::submenu(Menu::new("Settings").items([
                     MenuItem::action("Open Settings", zed_actions::OpenSettings),
@@ -86,8 +77,6 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
                 MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
                 MenuItem::separator(),
                 MenuItem::action("Extensions", zed_actions::Extensions::default()),
-                #[cfg(not(target_os = "windows"))]
-                MenuItem::action("Install CLI", install_cli::InstallCliBinary),
                 MenuItem::separator(),
                 #[cfg(target_os = "macos")]
                 MenuItem::action("Hide Zed", super::Hide),
@@ -278,12 +267,7 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
             name: "Help".into(),
             disabled: false,
             items: vec![
-                MenuItem::action(
-                    "View Release Notes Locally",
-                    auto_update_ui::ViewReleaseNotesLocally,
-                ),
                 MenuItem::action("View Dependency Licenses", zed_actions::OpenLicenses),
-                MenuItem::action("Show Welcome", onboarding::ShowWelcome),
                 MenuItem::separator(),
                 MenuItem::action(
                     "Documentation",
