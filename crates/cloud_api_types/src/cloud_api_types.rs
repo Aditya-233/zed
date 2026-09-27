@@ -6,8 +6,6 @@ mod timestamp;
 pub mod websocket_protocol;
 
 use std::collections::BTreeMap;
-use std::ops::Range;
-use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
