@@ -68,20 +68,47 @@ jobs:
           cargo fmt --all --check
 
       - name: Clippy Workspace
+        id: clippy
+        continue-on-error: true
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          set -o pipefail
+          cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings 2>&1 | tee clippy-report.txt
 
       - name: Test Workspace (Nextest)
+        id: nextest
+        continue-on-error: true
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          cargo nextest run --workspace --all-features
+          set -o pipefail
+          cargo nextest run --workspace --all-features --no-fail-fast 2>&1 | tee nextest-report.txt
 
       - name: Cargo Audit
+        id: audit
+        continue-on-error: true
         run: |
-          cargo audit
+          set -o pipefail
+          cargo audit 2>&1 | tee audit-report.txt
+
+      - name: Upload Diagnostic Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-diagnostic-reports
+          path: |
+            clippy-report.txt
+            nextest-report.txt
+            audit-report.txt
+          if-no-files-found: ignore
+
+      - name: Enforce Quality Gate Status
+        run: |
+          if [ "${{ steps.clippy.outcome }}" != "success" ] || [ "${{ steps.nextest.outcome }}" != "success" ] || [ "${{ steps.audit.outcome }}" != "success" ]; then
+            echo "::error::Quality gate checks failed. Inspect uploaded ci-diagnostic-reports artifact for full error report."
+            exit 1
+          fi
 
   # ========================================================
   # Parallel Packaging: Build Release & Arch Repo
