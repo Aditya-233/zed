@@ -81,12 +81,11 @@ use uuid::Uuid;
 use workspace::notifications::{NotificationId, dismiss_app_notification, show_app_notification};
 
 use workspace::{
-    AppState, MultiWorkspace, NewFile, NewWindow, OpenLog, Workspace, WorkspaceSettings,
+    AppState, MultiWorkspace, NewFile, NewWindow, OpenLog, Pane, Workspace, WorkspaceSettings,
     create_and_open_local_file, notifications::simple_message_notification::MessageNotification,
     open_new,
 };
 use workspace::{CloseProject, CloseWindow, with_active_or_new_workspace};
-use workspace::Pane;
 use zed_actions::{
     About, GetMerch, OpenAccountSettings, OpenBrowser, OpenDocs, OpenProjectTasks,
     OpenServerSettings, OpenSettingsFile, OpenStatusPage, OpenZedUrl, Quit,
