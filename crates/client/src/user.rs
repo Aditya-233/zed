@@ -913,10 +913,7 @@ impl UserStore {
         self.configuration_by_organization =
             response.configuration_by_organization.into_iter().collect();
 
-        self.edit_prediction_usage = Some(EditPredictionUsage(RequestUsage {
-            limit: response.plan.usage.edit_predictions.limit,
-            amount: response.plan.usage.edit_predictions.used as i32,
-        }));
+        self.edit_prediction_usage = None;
         self.plan_info = Some(response.plan);
         cx.emit(Event::PrivateUserInfoUpdated);
     }

@@ -501,12 +501,7 @@ fn main() {
         let session = cx.foreground_executor().block_on(session);
 
         let telemetry = client.telemetry();
-        telemetry.start(
-            None,
-            None,
-            session.id().to_owned(),
-            cx,
-        );
+        telemetry.start(None, None, session.id().to_owned(), cx);
         let app_session = cx.new(|cx| AppSession::new(session, cx));
 
         let app_state = Arc::new(AppState {

@@ -125,4 +125,3 @@ pub struct SubmitEditPredictionFeedbackBody {
     pub expected_output: Option<String>,
     pub feedback: String,
 }
-
