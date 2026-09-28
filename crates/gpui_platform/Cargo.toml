@@ -19,8 +19,16 @@ test-support = ["gpui/test-support"]
 runtime_shaders = []
 wayland = ["gpui_linux/wayland"]
 
+[[bench]]
+name = "randomized_element_tree"
+harness = false
+required-features = ["bench-support"]
+
 [dependencies]
 gpui.workspace = true
 
+[dev-dependencies]
+bench_metrics.workspace = true
+criterion.workspace = true
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 gpui_linux.workspace = true

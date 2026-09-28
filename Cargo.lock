@@ -4634,6 +4634,8 @@ dependencies = [
 name = "gpui_platform"
 version = "0.1.0"
 dependencies = [
+ "bench_metrics",
+ "criterion",
  "gpui",
  "gpui_linux",
 ]

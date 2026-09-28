@@ -95,7 +95,7 @@ pub fn bench(args: TokenStream, function: TokenStream) -> TokenStream {
                                 Some(Box::new(|| {
                                     gpui_platform::current_headless_renderer()
                                 })),
-                                gpui_platform::current_platform(true).text_system(),
+                                gpui_platform::bench_text_system(),
                             ),
                             Some(stringify!(#outer_fn_name)),
                             bencher,
@@ -138,7 +138,7 @@ pub fn bench(args: TokenStream, function: TokenStream) -> TokenStream {
                             Some(Box::new(|| {
                                 gpui_platform::current_headless_renderer()
                             })),
-                            gpui_platform::current_platform(true).text_system(),
+                            gpui_platform::bench_text_system(),
                         ),
                         Some(stringify!(#outer_fn_name)),
                         bencher,
