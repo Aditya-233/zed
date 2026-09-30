@@ -3649,6 +3649,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "file_content"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chardetng",
+ "encoding_rs",
+ "futures-lite 2.6.1",
+]
+
+[[package]]
 name = "file_finder"
 version = "0.1.0"
 dependencies = [
@@ -4224,6 +4234,7 @@ dependencies = [
 name = "git"
 version = "0.1.0"
 dependencies = [
+ "file_content",
  "anyhow",
  "askpass",
  "async-channel 2.5.0",
@@ -6118,6 +6129,7 @@ checksum = "884f3e747ed2dcee867cda1b0c31a048f9e20de2d916a248949319921a2e666e"
 name = "language"
 version = "0.1.0"
 dependencies = [
+ "file_content",
  "anyhow",
  "async-trait",
  "chardetng",
@@ -9330,6 +9342,7 @@ dependencies = [
 name = "project"
 version = "0.1.0"
 dependencies = [
+ "file_content",
  "aho-corasick",
  "anyhow",
  "askpass",
@@ -15899,6 +15912,7 @@ dependencies = [
 name = "worktree"
 version = "0.1.0"
 dependencies = [
+ "file_content",
  "anyhow",
  "async-channel 2.5.0",
  "async-lock",
