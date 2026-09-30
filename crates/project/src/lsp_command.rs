@@ -3910,9 +3910,46 @@ impl LspCommand for OnTypeFormatting {
 }
 
 impl InlayHints {
+    fn project_hint_kind(kind: Option<lsp::InlayHintKind>) -> Option<InlayHintKind> {
+        kind.and_then(|kind| match kind {
+            lsp::InlayHintKind::TYPE => Some(InlayHintKind::Type),
+            lsp::InlayHintKind::PARAMETER => Some(InlayHintKind::Parameter),
+            _ => None,
+        })
+    }
+
+    /// Returns the clipped position and the bias to use for this hint in isolation.
+    fn hint_position_and_bias(
+        lsp_hint: &lsp::InlayHint,
+        snapshot: &BufferSnapshot,
+    ) -> (PointUtf16, Bias) {
+        let position = snapshot.clip_point_utf16(point_from_lsp(lsp_hint.position), Bias::Left);
+        let bias = match Self::project_hint_kind(lsp_hint.kind) {
+            Some(InlayHintKind::Type) => Bias::Right,
+            Some(InlayHintKind::Parameter) => Bias::Left,
+            None => match (
+                lsp_hint.padding_left.unwrap_or(false),
+                lsp_hint.padding_right.unwrap_or(false),
+            ) {
+                (true, false) => Bias::Right,
+                (false, true) => Bias::Left,
+                _ => {
+                    let offset = position.to_offset(snapshot);
+                    let (range, _) = snapshot.surrounding_word(offset, None);
+                    if range.start < offset {
+                        Bias::Right
+                    } else {
+                        Bias::Left
+                    }
+                }
+            },
+        };
+        (position, bias)
+    }
+
     pub async fn lsp_to_project_hint(
         lsp_hint: lsp::InlayHint,
-        buffer_handle: &Entity<Buffer>,
+        position: Anchor,
         server_id: LanguageServerId,
         resolve_state: ResolveState,
         force_no_type_left_padding: bool,
@@ -3924,14 +3961,6 @@ impl InlayHints {
             _ => None,
         });
 
-        let position = buffer_handle.read_with(cx, |buffer, _| {
-            let position = buffer.clip_point_utf16(point_from_lsp(lsp_hint.position), Bias::Left);
-            if kind == Some(InlayHintKind::Parameter) {
-                buffer.anchor_before(position)
-            } else {
-                buffer.anchor_after(position)
-            }
-        });
         let label = Self::lsp_inlay_label_to_project(lsp_hint.label, server_id)
             .await
             .context("lsp to project inlay hint conversion")?;
@@ -4374,26 +4403,32 @@ impl LspCommand for InlayHints {
             )
         });
 
-        let hints = message.unwrap_or_default().into_iter().map(|lsp_hint| {
-            let resolve_state = if can_resolve {
-                ResolveState::CanResolve(lsp_server.server_id(), lsp_hint.data.clone())
-            } else {
-                ResolveState::Resolved
-            };
-
-            let buffer = buffer.clone();
-            cx.spawn(async move |cx| {
-                InlayHints::lsp_to_project_hint(
-                    lsp_hint,
-                    &buffer,
-                    server_id,
-                    resolve_state,
-                    force_no_type_left_padding,
-                    cx,
-                )
-                .await
-            })
-        });
+        let snapshot = buffer.read_with(&cx, |buffer, _| buffer.snapshot());
+        let last_row = snapshot.max_point().row;
+        let hints = message
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|lsp_hint| lsp_hint.position.line <= last_row)
+            .map(|lsp_hint| {
+                let resolve_state = if can_resolve {
+                    ResolveState::CanResolve(lsp_server.server_id(), lsp_hint.data.clone())
+                } else {
+                    ResolveState::Resolved
+                };
+                let (position, bias) = InlayHints::hint_position_and_bias(&lsp_hint, &snapshot);
+                let anchor = snapshot.anchor_at(position, bias);
+                cx.spawn(async move |cx| {
+                    InlayHints::lsp_to_project_hint(
+                        lsp_hint,
+                        anchor,
+                        server_id,
+                        resolve_state,
+                        force_no_type_left_padding,
+                        cx,
+                    )
+                    .await
+                })
+            });
         future::join_all(hints)
             .await
             .into_iter()
