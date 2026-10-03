@@ -24,13 +24,11 @@ use extension::ExtensionHostProxy;
 use fs::{Fs, RealFs};
 use futures::{FutureExt, StreamExt, channel::oneshot};
 use git::GitHostingProviderRegistry;
-use git_ui::clone::clone_and_open;
 use gpui::{App, AppContext, Application, AsyncApp, QuitMode, Task, TaskExt, UpdateGlobal as _};
 use gpui_platform;
 
 use gpui_tokio::Tokio;
 use language::LanguageRegistry;
-use project_panel::ProjectPanel;
 use reqwest_client::ReqwestClient;
 
 use crate::zed::{OpenRequestKind, eager_load_active_theme_and_icon_theme};
@@ -426,7 +424,6 @@ fn main() {
         <dyn Fs>::set_global(fs.clone(), cx);
 
         GitHostingProviderRegistry::set_global(git_hosting_provider_registry, cx);
-        git_hosting_providers::init(cx);
 
         OpenListener::set_global(cx, open_listener.clone());
 
@@ -576,11 +573,9 @@ fn main() {
         settings_profile_selector::init(cx);
         language_tools::init(cx);
         notifications::init(app_state.client.clone(), app_state.user_store.clone(), cx);
-        git_ui::init(cx);
         markdown_preview::init(cx);
         tabular_data_preview::init(cx);
         svg_preview::init(cx);
-        keymap_editor::init(cx);
         extensions_ui::init(cx);
         json_schema_store::init(cx);
 
@@ -899,90 +894,11 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 })
                 .detach_and_log_err(cx);
             }
-            OpenRequestKind::GitClone { repo_url } => {
-                workspace::with_active_or_new_workspace(cx, |_workspace, window, cx| {
-                    if window.is_window_active() {
-                        clone_and_open(
-                            repo_url,
-                            cx.weak_entity(),
-                            window,
-                            cx,
-                            Arc::new(|workspace: &mut workspace::Workspace, window, cx| {
-                                workspace.focus_panel::<ProjectPanel>(window, cx);
-                            }),
-                        );
-                        return;
-                    }
-
-                    let subscription = Rc::new(RefCell::new(None));
-                    subscription.replace(Some(cx.observe_in(&cx.entity(), window, {
-                        let subscription = subscription.clone();
-                        let repo_url = repo_url;
-                        move |_, workspace_entity, window, cx| {
-                            if window.is_window_active() && subscription.take().is_some() {
-                                clone_and_open(
-                                    repo_url.clone(),
-                                    workspace_entity.downgrade(),
-                                    window,
-                                    cx,
-                                    Arc::new(|workspace: &mut workspace::Workspace, window, cx| {
-                                        workspace.focus_panel::<ProjectPanel>(window, cx);
-                                    }),
-                                );
-                            }
-                        }
-                    })));
-                });
+            OpenRequestKind::GitClone { repo_url: _ } => {
+                log::warn!("git clone via URL scheme is not supported");
             }
-            OpenRequestKind::GitCommit { sha } => {
-                let base_open_options = zed::open_options_for_request(
-                    request.open_behavior,
-                    &workspace::SerializedWorkspaceLocation::Local,
-                    cx,
-                );
-                cx.spawn(async move |cx| {
-                    let paths_with_position =
-                        derive_paths_with_position(app_state.fs.as_ref(), request.open_paths).await;
-                    let (workspace, _results) = open_paths_with_positions(
-                        &paths_with_position,
-                        &[],
-                        false,
-                        app_state,
-                        base_open_options,
-                        cx,
-                    )
-                    .await?;
-
-                    workspace
-                        .update(cx, |multi_workspace, window, cx| {
-                            multi_workspace
-                                .workspace()
-                                .clone()
-                                .update(cx, |workspace, cx| {
-                                    let Some(repo) =
-                                        workspace.project().read(cx).active_repository(cx)
-                                    else {
-                                        log::error!("no active repository found for commit view");
-                                        return Err(anyhow::anyhow!("no active repository found"));
-                                    };
-
-                                    git_ui::commit_view::CommitView::open(
-                                        sha,
-                                        repo.downgrade(),
-                                        workspace.weak_handle(),
-                                        None,
-                                        None,
-                                        window,
-                                        cx,
-                                    );
-                                    Ok(())
-                                })
-                        })
-                        .log_err();
-
-                    anyhow::Ok(())
-                })
-                .detach_and_log_err(cx);
+            OpenRequestKind::GitCommit { sha: _ } => {
+                log::warn!("git commit view via URL scheme is not supported");
             }
         }
 

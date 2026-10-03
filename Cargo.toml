@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/action_log",
     "crates/activity_indicator",
     "crates/askpass",
     "crates/assets",
@@ -37,9 +36,6 @@ members = [
     "crates/fuzzy",
     "crates/fuzzy_nucleo",
     "crates/git",
-    "crates/git_hosting_providers",
-    "crates/git_ui",
-    "crates/git_ui_core",
     "crates/go_to_line",
     "crates/gpui",
     "crates/gpui_linux",
@@ -55,10 +51,8 @@ members = [
     "crates/http_client_tls",
     "crates/icons",
     "crates/image_viewer",
-    "crates/input_latency_ui",
     "crates/journal",
     "crates/json_schema_store",
-    "crates/keymap_editor",
     "crates/language",
     "crates/language_core",
     "crates/language_detection",
@@ -173,7 +167,6 @@ edition = "2024"
 # Workspace member crates
 #
 
-action_log = { path = "crates/action_log" }
 activity_indicator = { path = "crates/activity_indicator" }
 askpass = { path = "crates/askpass" }
 assets = { path = "crates/assets" }
@@ -208,9 +201,6 @@ fs = { path = "crates/fs" }
 fuzzy = { path = "crates/fuzzy" }
 fuzzy_nucleo = { path = "crates/fuzzy_nucleo" }
 git = { path = "crates/git" }
-git_hosting_providers = { path = "crates/git_hosting_providers" }
-git_ui = { path = "crates/git_ui" }
-git_ui_core = { path = "crates/git_ui_core" }
 go_to_line = { path = "crates/go_to_line" }
 gpui = { path = "crates/gpui", default-features = false }
 gpui_linux = { path = "crates/gpui_linux" }
@@ -226,10 +216,8 @@ http_client = { path = "crates/http_client" }
 http_client_tls = { path = "crates/http_client_tls" }
 icons = { path = "crates/icons" }
 image_viewer = { path = "crates/image_viewer" }
-input_latency_ui = { path = "crates/input_latency_ui" }
 journal = { path = "crates/journal" }
 json_schema_store = { path = "crates/json_schema_store" }
-keymap_editor = { path = "crates/keymap_editor" }
 language = { path = "crates/language" }
 language_core = { path = "crates/language_core" }
 language_detection = { path = "crates/language_detection" }

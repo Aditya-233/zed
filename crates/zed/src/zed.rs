@@ -20,13 +20,6 @@ use extension_host::ExtensionStore;
 use feature_flags::{FeatureFlagAppExt as _, PanicFeatureFlag};
 use fs::Fs;
 use futures::{StreamExt, channel::mpsc, select_biased};
-use git_ui::branch_diff::BranchDiffToolbar;
-use git_ui::commit_view::CommitViewToolbar;
-use git_ui::git_panel::GitPanel;
-use git_ui::project_diff::ProjectDiffToolbar;
-use git_ui::solo_diff_view::{SoloDiffGitToolbar, SoloDiffStyleToolbar};
-use git_ui::staged_diff::StagedDiffToolbar;
-use git_ui::unstaged_diff::UnstagedDiffToolbar;
 use gpui::{
     Action, App, AppContext as _, ClipboardItem, Context, DismissEvent, Element, Entity,
     FocusHandle, Focusable, Image, ImageFormat, KeyBinding, ParentElement, PathPromptOptions,
@@ -517,16 +510,11 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
             cx.new(|_| go_to_line::cursor_position::CursorPosition::new(workspace));
         let line_ending_indicator =
             cx.new(|_| line_ending_selector::LineEndingIndicator::default());
-        let git_blame_status = cx.new(|_| git_ui::GitBlameStatus::default());
-        let merge_conflict_indicator =
-            cx.new(|cx| git_ui::MergeConflictIndicator::new(workspace, cx));
         workspace.status_bar().update(cx, |status_bar, cx| {
             status_bar.add_left_item(search_button, window, cx);
             status_bar.add_left_item(lsp_button, window, cx);
             status_bar.add_left_item(diagnostic_summary, window, cx);
             status_bar.add_left_item(active_file_name, window, cx);
-            status_bar.add_left_item(git_blame_status, window, cx);
-            status_bar.add_left_item(merge_conflict_indicator, window, cx);
             status_bar.add_left_item(activity_indicator, window, cx);
             status_bar.add_right_item(active_buffer_encoding, window, cx);
             status_bar.add_right_item(active_buffer_language, window, cx);
@@ -663,7 +651,6 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
     cx.spawn_in(window, async move |workspace_handle, cx| {
         let project_panel = ProjectPanel::load(workspace_handle.clone(), cx.clone());
         let terminal_panel = TerminalPanel::load(workspace_handle.clone(), cx.clone());
-        let git_panel = GitPanel::load(workspace_handle.clone(), cx.clone());
 
         async fn add_panel_when_ready(
             panel_task: impl Future<Output = anyhow::Result<Entity<impl workspace::Panel>>> + 'static,
@@ -683,7 +670,6 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
         futures::join!(
             add_panel_when_ready(project_panel, workspace_handle.clone(), cx.clone()),
             add_panel_when_ready(terminal_panel, workspace_handle.clone(), cx.clone()),
-            add_panel_when_ready(git_panel, workspace_handle.clone(), cx.clone()),
         );
 
         workspace_handle.update(cx, |workspace, cx| {
@@ -704,52 +690,6 @@ fn register_actions(
         .register_action(|_, _: &OpenDocs, _, cx| cx.open_url(DOCS_URL))
         .register_action(|_, _: &OpenStatusPage, _, cx| cx.open_url(STATUS_URL))
         .register_action(|_, _: &GetMerch, _, cx| cx.open_url(MERCH_URL))
-        .register_action(
-            |workspace: &mut Workspace,
-             _: &input_latency_ui::DumpInputLatencyHistogram,
-             window: &mut Window,
-             cx: &mut Context<Workspace>| {
-                let project = workspace.project().clone();
-                // In a collab session the report buffer is visible to other
-                // participants, so attribute the data to this user's machine.
-                let reported_by = if project.read(cx).is_shared()
-                    || project.read(cx).is_via_collab()
-                {
-                    workspace
-                        .user_store()
-                        .read(cx)
-                        .current_user()
-                        .map(|user| user.username.to_string())
-                } else {
-                    None
-                };
-                let report_data = input_latency_ui::snapshot_input_latency_report(
-                    window,
-                    reported_by,
-                    cx,
-                );
-                cx.spawn_in(window, async move |workspace, cx| {
-                    let report = cx
-                        .background_spawn(async move {
-                            input_latency_ui::format_input_latency_report(&report_data)
-                        })
-                        .await;
-                    let buffer = project
-                        .update(cx, |project, cx| project.create_buffer(None, true, cx))
-                        .await?;
-                    buffer.update(cx, |buffer, cx| {
-                        buffer.set_text(report, cx);
-                    });
-                    workspace.update_in(cx, |workspace, window, cx| {
-                        let editor = cx
-                            .new(|cx| Editor::for_buffer(buffer, Some(project), window, cx));
-                        workspace
-                            .add_item_to_active_pane(Box::new(editor), None, true, window, cx);
-                    })
-                })
-                .detach_and_log_err(cx);
-            },
-        )
         .register_action(
             |workspace: &mut Workspace,
              _: &DumpAccessibilityTree,
@@ -1151,8 +1091,6 @@ fn initialize_pane(
     let workspace_handle = cx.weak_entity();
     pane.update(cx, |pane, cx| {
         pane.toolbar().update(cx, |toolbar, cx| {
-            let solo_diff_style_toolbar = cx.new(SoloDiffStyleToolbar::new);
-            toolbar.add_item(solo_diff_style_toolbar, window, cx);
             let breadcrumbs = cx.new(|_| Breadcrumbs::new());
             toolbar.add_item(breadcrumbs, window, cx);
             let buffer_search_bar = cx.new(|cx| {
@@ -1180,18 +1118,6 @@ fn initialize_pane(
             let highlights_tree_item =
                 cx.new(|_| language_tools::HighlightsTreeToolbarItemView::new());
             toolbar.add_item(highlights_tree_item, window, cx);
-            let project_diff_toolbar = cx.new(|cx| ProjectDiffToolbar::new(workspace, cx));
-            toolbar.add_item(project_diff_toolbar, window, cx);
-            let staged_diff_toolbar = cx.new(|cx| StagedDiffToolbar::new(workspace, cx));
-            toolbar.add_item(staged_diff_toolbar, window, cx);
-            let unstaged_diff_toolbar = cx.new(|cx| UnstagedDiffToolbar::new(workspace, cx));
-            toolbar.add_item(unstaged_diff_toolbar, window, cx);
-            let branch_diff_toolbar = cx.new(BranchDiffToolbar::new);
-            toolbar.add_item(branch_diff_toolbar, window, cx);
-            let solo_diff_git_toolbar = cx.new(SoloDiffGitToolbar::new);
-            toolbar.add_item(solo_diff_git_toolbar, window, cx);
-            let commit_view_toolbar = cx.new(|_| CommitViewToolbar::new());
-            toolbar.add_item(commit_view_toolbar, window, cx);
             let image_view_toolbar = cx.new(|_| image_viewer::ImageViewToolbarControls::new());
             toolbar.add_item(image_view_toolbar, window, cx);
         })
@@ -1963,8 +1889,6 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
         "New Window",
         workspace::NewWindow,
     )]);
-    // todo: nicer api here?
-    keymap_editor::KeymapEventChannel::trigger_keymap_changed(cx);
 }
 
 pub fn load_default_keymap(cx: &mut App) {
@@ -5360,8 +5284,6 @@ mod tests {
                 "agents_sidebar",
                 "assistant",
                 "assistant2",
-                "branch_picker",
-                "branches",
                 "buffer_search",
                 "call_hierarchy",
                 "client",
@@ -5376,17 +5298,11 @@ mod tests {
                 "feedback",
                 "file_finder",
                 "git",
-                "git_graph",
-                "git_onboarding",
-                "git_panel",
-                "git_picker",
                 "go_to_line",
                 "highlights_tree_view",
                 "icon_theme_selector",
                 "image_viewer",
                 "journal",
-                "keymap_editor",
-                "keystroke_input",
                 "language_selector",
                 "welcome",
                 "line_ending_selector",
@@ -5408,7 +5324,6 @@ mod tests {
                 "search",
                 "settings_profile_selector",
                 "snippets",
-                "stash_picker",
                 "svg",
                 "syntax_tree_view",
                 "tab_switcher",
@@ -5609,7 +5524,6 @@ mod tests {
             release_channel::init(Version::new(0, 0, 0), cx);
             command_palette::init(cx);
             editor::init(cx);
-            git_ui::init(cx);
             project_panel::init(cx);
             terminal_view::init(cx);
             image_viewer::init(cx);

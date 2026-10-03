@@ -16,7 +16,6 @@ use file_icons::FileIcons;
 use fs::TrashId;
 use git;
 use git::status::GitSummary;
-use git_ui_core::file_diff_view::FileDiffView;
 use gpui::{
     Action, AnyElement, App, AsyncWindowContext, Bounds, ClipboardEntry as GpuiClipboardEntry,
     ClipboardItem, Context, CursorStyle, DismissEvent, Div, DragMoveEvent, Entity, EventEmitter,
@@ -48,7 +47,6 @@ use settings::{
 };
 use smallvec::SmallVec;
 use std::{
-    any::TypeId,
     cell::OnceCell,
     cmp,
     collections::HashSet,
@@ -557,38 +555,6 @@ pub fn init(cx: &mut App) {
                 panel.update(cx, |panel, cx| panel.delete(action, window, cx));
             }
         });
-
-        // Forwards `git::FileHistory` to the file history opener installed by
-        // `git_ui` when the project panel is the focused source of selection.
-        // Lives here (and not in `git_ui`) so that `git_ui` does not need to
-        // depend on `project_panel`, which would create a dependency cycle.
-        workspace.register_action_renderer(|div, workspace, window, cx| {
-            let Some(panel) = workspace.panel::<ProjectPanel>(cx) else {
-                return div;
-            };
-            if !panel.read(cx).focus_handle(cx).contains_focused(window, cx) {
-                return div;
-            }
-            if panel.read(cx).selected_entry_project_path(cx).is_none() {
-                return div;
-            }
-            let workspace = workspace.weak_handle();
-            div.capture_action(move |_: &git::FileHistory, window, cx| {
-                workspace
-                    .update(cx, |workspace, cx| {
-                        let Some(panel) = workspace.panel::<ProjectPanel>(cx) else {
-                            return;
-                        };
-                        let Some(project_path) = panel.read(cx).selected_entry_project_path(cx)
-                        else {
-                            return;
-                        };
-                        git_ui_core::open_file_history(workspace, &project_path, window, cx);
-                    })
-                    .log_err();
-                cx.stop_propagation();
-            })
-        });
     })
     .detach();
 }
@@ -717,17 +683,7 @@ impl ProjectPanel {
                         }
                     }
                     project::Event::ActiveEntryChanged(None) => {
-                        let is_active_item_file_diff_view = this
-                            .workspace
-                            .upgrade()
-                            .and_then(|ws| ws.read(cx).active_item(cx))
-                            .map(|item| {
-                                item.act_as_type(TypeId::of::<FileDiffView>(), cx).is_some()
-                            })
-                            .unwrap_or(false);
-                        if !is_active_item_file_diff_view {
-                            this.marked_entries.clear();
-                        }
+                        this.marked_entries.clear();
                     }
                     project::Event::RevealInProjectPanel(entry_id) => {
                         if let Some(()) = this
@@ -3912,22 +3868,14 @@ impl ProjectPanel {
     fn compare_marked_files(
         &mut self,
         _: &CompareMarkedFiles,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let selected_files = self.file_abs_paths_to_diff(cx);
         if let Some((file_path1, file_path2)) = selected_files {
             self.workspace
                 .update(cx, |workspace, cx| {
-                    FileDiffView::open(
-                        file_path1,
-                        file_path2,
-                        None,
-                        workspace.weak_handle(),
-                        window,
-                        cx,
-                    )
-                    .detach_and_log_err(cx);
+                    workspace.open_paths(vec![file_path1, file_path2], None, true, cx)
                 })
                 .ok();
         }
@@ -6854,15 +6802,6 @@ impl ProjectPanel {
             });
             self.autoscroll(cx);
             cx.notify();
-            return Ok(());
-        }
-        let is_active_item_file_diff_view = self
-            .workspace
-            .upgrade()
-            .and_then(|ws| ws.read(cx).active_item(cx))
-            .map(|item| item.act_as_type(TypeId::of::<FileDiffView>(), cx).is_some())
-            .unwrap_or(false);
-        if is_active_item_file_diff_view {
             return Ok(());
         }
 

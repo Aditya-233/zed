@@ -940,7 +940,6 @@ async fn test_git_provider_project_setting(cx: &mut gpui::TestAppContext) {
     init_test(cx);
     cx.update(|cx| {
         GitHostingProviderRegistry::default_global(cx);
-        git_hosting_providers::init(cx);
     });
 
     let fs = FakeFs::new(cx.executor());
