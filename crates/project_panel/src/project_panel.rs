@@ -3868,14 +3868,22 @@ impl ProjectPanel {
     fn compare_marked_files(
         &mut self,
         _: &CompareMarkedFiles,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let selected_files = self.file_abs_paths_to_diff(cx);
         if let Some((file_path1, file_path2)) = selected_files {
             self.workspace
                 .update(cx, |workspace, cx| {
-                    workspace.open_paths(vec![file_path1, file_path2], None, true, cx)
+                    workspace
+                        .open_paths(
+                            vec![file_path1, file_path2],
+                            OpenOptions::default(),
+                            None,
+                            window,
+                            cx,
+                        )
+                        .detach();
                 })
                 .ok();
         }
