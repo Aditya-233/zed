@@ -28,7 +28,6 @@ use encoding_rs;
 use fs::{FakeFs, PathEventKind, RealFs};
 use futures::{FutureExt as _, StreamExt, channel::oneshot, future};
 use git::{
-    GitHostingProviderRegistry,
     repository::{RepoPath, repo_path},
     status::{DiffStat, FileStatus, StatusCode, TrackedStatus},
 };
