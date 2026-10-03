@@ -15,7 +15,7 @@ use settings::{FolderIndicator, ProjectPanelAutoOpenSettings, SettingsStore, Spl
 use std::path::{Path, PathBuf};
 use util::{path, rel_path::rel_path};
 use workspace::{
-    AppState, ItemHandle, MultiWorkspace, Pane, Workspace,
+    AppState, MultiWorkspace, Pane, Workspace,
     item::{Item, ProjectItem, test::TestItem},
     register_project_item,
 };
@@ -9710,95 +9710,6 @@ async fn test_hide_root(cx: &mut gpui::TestAppContext) {
             "With hide_root=false and multiple worktrees, roots should be visible"
         );
     }
-}
-
-#[gpui::test]
-async fn test_compare_selected_files(cx: &mut gpui::TestAppContext) {
-    init_test_with_editor(cx);
-
-    let fs = FakeFs::new(cx.executor());
-    fs.insert_tree(
-        "/root",
-        json!({
-            "file1.txt": "content of file1",
-            "file2.txt": "content of file2",
-            "dir1": {
-                "file3.txt": "content of file3"
-            }
-        }),
-    )
-    .await;
-
-    let project = Project::test(fs.clone(), ["/root".as_ref()], cx).await;
-    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
-    let workspace = window
-        .read_with(cx, |mw, _| mw.workspace().clone())
-        .unwrap();
-    let cx = &mut VisualTestContext::from_window(window.into(), cx);
-    let panel = workspace.update_in(cx, ProjectPanel::new);
-    cx.run_until_parked();
-
-    let file1_path = "root/file1.txt";
-    let file2_path = "root/file2.txt";
-    select_path_with_mark(&panel, file1_path, cx);
-    select_path_with_mark(&panel, file2_path, cx);
-
-    panel.update_in(cx, |panel, window, cx| {
-        panel.compare_marked_files(&CompareMarkedFiles, window, cx);
-    });
-    cx.executor().run_until_parked();
-
-    workspace.update_in(cx, |workspace, _, cx| {
-        let active_items = workspace
-            .panes()
-            .iter()
-            .filter_map(|pane| pane.read(cx).active_item())
-            .collect::<Vec<_>>();
-        assert!(!active_items.is_empty());
-    });
-
-    let file1_entry_id = find_project_entry(&panel, file1_path, cx).unwrap();
-    let file2_entry_id = find_project_entry(&panel, file2_path, cx).unwrap();
-    let worktree_id = panel.update(cx, |panel, cx| {
-        panel
-            .project
-            .read(cx)
-            .worktrees(cx)
-            .next()
-            .unwrap()
-            .read(cx)
-            .id()
-    });
-
-    let expected_entries = [
-        SelectedEntry {
-            worktree_id,
-            entry_id: file1_entry_id,
-        },
-        SelectedEntry {
-            worktree_id,
-            entry_id: file2_entry_id,
-        },
-    ];
-    panel.update(cx, |panel, _cx| {
-        assert_eq!(
-            &panel.marked_entries, &expected_entries,
-            "Should keep marked entries after comparison"
-        );
-    });
-
-    panel.update(cx, |panel, cx| {
-        panel.project.update(cx, |_, cx| {
-            cx.emit(project::Event::RevealInProjectPanel(file2_entry_id))
-        })
-    });
-
-    panel.update(cx, |panel, _cx| {
-        assert_eq!(
-            &panel.marked_entries, &expected_entries,
-            "Marked entries should persist after focusing back on the project panel"
-        );
-    });
 }
 
 #[gpui::test]
