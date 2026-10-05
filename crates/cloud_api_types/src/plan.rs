@@ -14,13 +14,17 @@ pub enum Plan {
     ZedStudent,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrentUsage;
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlanInfo {
     /// We've named this field `plan_v3` to avoid breaking older clients when we start returning new plan variants.
     #[serde(rename = "plan_v3")]
     pub plan: KnownOrUnknown<Plan, String>,
     pub subscription_period: Option<SubscriptionPeriod>,
-    pub usage: cloud_llm_client::CurrentUsage,
+    #[serde(default)]
+    pub usage: CurrentUsage,
     pub trial_started_at: Option<Timestamp>,
     pub is_account_too_young: bool,
     pub has_overdue_invoices: bool,

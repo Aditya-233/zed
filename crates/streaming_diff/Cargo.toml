@@ -19,7 +19,3 @@ rope.workspace = true
 criterion.workspace = true
 rand.workspace = true
 util = { workspace = true, features = ["test-support"] }
-
-[[bench]]
-name = "streaming_diff"
-harness = false

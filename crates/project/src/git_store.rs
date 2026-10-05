@@ -10121,15 +10121,6 @@ impl Repository {
             let Some(state) = state.await.log_err() else {
                 return;
             };
-            if let Some(git_hosting_provider_registry) =
-                cx.update(|cx| GitHostingProviderRegistry::try_global(cx))
-            {
-                git_hosting_providers::register_additional_providers(
-                    git_hosting_provider_registry,
-                    state.backend.clone(),
-                )
-                .await;
-            }
             let state = RepositoryState::Local(state);
             let mut jobs = VecDeque::new();
             loop {
@@ -11562,7 +11553,6 @@ mod tests {
         init_test(cx);
         cx.update(|cx| {
             GitHostingProviderRegistry::default_global(cx);
-            git_hosting_providers::init(cx);
         });
 
         let fs = FakeFs::new(cx.executor());

@@ -1,6 +1,5 @@
 use anyhow::Context as _;
 use collections::HashMap;
-use context_server::ContextServerCommand;
 use dap::adapters::DebugAdapterName;
 use fs::Fs;
 use futures::StreamExt as _;
@@ -19,6 +18,7 @@ use rpc::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use settings::BinarySettings;
+pub use settings::ContextServerCommand;
 pub use settings::DirenvSettings;
 pub use settings::LspSettings;
 use settings::{

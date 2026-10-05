@@ -29,9 +29,5 @@ util = { workspace = true, features = ["test-support"] }
 criterion.workspace = true
 zlog.workspace = true
 
-[[bench]]
-name = "rope_benchmark"
-harness = false
-
 [package.metadata.cargo-shear]
 ignored = ["tracing"]
