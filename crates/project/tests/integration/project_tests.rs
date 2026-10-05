@@ -3,7 +3,6 @@
 mod agent_registry_store;
 mod bookmark_store;
 mod color_extractor;
-mod context_server_store;
 mod debugger;
 mod dynamic_registration;
 mod git_store;
@@ -29,7 +28,6 @@ use encoding_rs;
 use fs::{FakeFs, PathEventKind, RealFs};
 use futures::{FutureExt as _, StreamExt, channel::oneshot, future};
 use git::{
-    GitHostingProviderRegistry,
     repository::{RepoPath, repo_path},
     status::{DiffStat, FileStatus, StatusCode, TrackedStatus},
 };
@@ -933,71 +931,6 @@ async fn test_shared_external_editorconfig_cleanup_with_multiple_worktrees(
 
         // Test worktree_b still has correct settings
         assert_eq!(Some(settings.tab_size), NonZeroU32::new(5));
-    });
-}
-
-#[gpui::test]
-async fn test_git_provider_project_setting(cx: &mut gpui::TestAppContext) {
-    init_test(cx);
-    cx.update(|cx| {
-        GitHostingProviderRegistry::default_global(cx);
-        git_hosting_providers::init(cx);
-    });
-
-    let fs = FakeFs::new(cx.executor());
-    let str_path = path!("/dir");
-    let path = Path::new(str_path);
-
-    fs.insert_tree(
-        path!("/dir"),
-        json!({
-            ".zed": {
-                "settings.json": r#"{
-                    "git_hosting_providers": [
-                        {
-                            "provider": "gitlab",
-                            "base_url": "https://google.com",
-                            "name": "foo"
-                        }
-                    ]
-                }"#
-            },
-        }),
-    )
-    .await;
-
-    let project = Project::test(fs.clone(), [path!("/dir").as_ref()], cx).await;
-    let (_worktree, _) =
-        project.read_with(cx, |project, cx| project.find_worktree(path, cx).unwrap());
-    cx.executor().run_until_parked();
-
-    cx.update(|cx| {
-        let provider = GitHostingProviderRegistry::global(cx);
-        assert!(
-            provider
-                .list_hosting_providers()
-                .into_iter()
-                .any(|provider| provider.name() == "foo")
-        );
-    });
-
-    fs.atomic_write(
-        Path::new(path!("/dir/.zed/settings.json")).to_owned(),
-        "{}".into(),
-    )
-    .await
-    .unwrap();
-
-    cx.run_until_parked();
-
-    cx.update(|cx| {
-        let provider = GitHostingProviderRegistry::global(cx);
-        assert!(
-            !provider
-                .list_hosting_providers()
-                .into_iter()
-                .any(|provider| provider.name() == "foo")
-        );
     });
 }
 

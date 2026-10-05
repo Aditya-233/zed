@@ -22,7 +22,3 @@ path.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
-
-[[bench]]
-name = "match_benchmark"
-harness = false

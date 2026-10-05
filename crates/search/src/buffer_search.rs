@@ -1958,7 +1958,7 @@ mod tests {
         let mut editor = None;
         let window = cx.add_window(|window, cx| {
             let default_key_bindings = settings::KeymapFile::load_asset_allow_partial_failure(
-                "keymaps/default-macos.json",
+                "keymaps/default-linux.json",
                 cx,
             )
             .unwrap();
@@ -2001,7 +2001,7 @@ mod tests {
         let mut editor = None;
         let window = cx.add_window(|window, cx| {
             let default_key_bindings = settings::KeymapFile::load_asset_allow_partial_failure(
-                "keymaps/default-macos.json",
+                "keymaps/default-linux.json",
                 cx,
             )
             .unwrap();
@@ -3372,7 +3372,7 @@ mod tests {
 
         let window = cx.add_window(|window, cx| {
             let default_key_bindings = settings::KeymapFile::load_asset_allow_partial_failure(
-                "keymaps/default-macos.json",
+                "keymaps/default-linux.json",
                 cx,
             )
             .unwrap();

@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result, anyhow};
 use cloud_api_client::{
     AuthenticatedUser, GetAuthenticatedUserResponse, KnownOrUnknown, Plan, PlanInfo,
 };
-use cloud_llm_client::{CurrentUsage, UsageData, UsageLimit};
+use cloud_api_types::CurrentUsage;
 use futures::{StreamExt, stream::BoxStream};
 use gpui::{AppContext as _, TestAppContext};
 use http_client::{AsyncBody, Method, Request, http};
@@ -259,12 +259,7 @@ pub fn make_get_authenticated_user_response(
         plan: PlanInfo {
             plan: KnownOrUnknown::Known(Plan::ZedPro),
             subscription_period: None,
-            usage: CurrentUsage {
-                edit_predictions: UsageData {
-                    used: 250,
-                    limit: UsageLimit::Unlimited,
-                },
-            },
+            usage: CurrentUsage,
             trial_started_at: None,
             is_account_too_young: false,
             has_overdue_invoices: false,

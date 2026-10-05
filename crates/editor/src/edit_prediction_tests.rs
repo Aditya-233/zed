@@ -1,5 +1,5 @@
-use edit_prediction_types::{
-    EditPredictionDelegate, EditPredictionIconSet, EditPredictionRequestTrigger,
+use crate::edit_prediction_types::{
+    self, EditPredictionDelegate, EditPredictionIconSet, EditPredictionRequestTrigger,
     PredictedCursorPosition,
 };
 use futures::StreamExt;

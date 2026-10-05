@@ -13,34 +13,17 @@ use std::{
     process::Output,
 };
 
-use http_proxy::ProxyHandle;
-#[cfg(not(target_os = "windows"))]
-use http_proxy::{Allowlist, HostPattern, ProxyConfig, ProxyEvent, UpstreamProxy};
-
 #[cfg(target_os = "linux")]
 mod linux_bubblewrap;
 
-#[cfg(target_os = "macos")]
-mod macos_seatbelt;
-
-#[cfg(target_os = "windows")]
-mod windows_wsl;
-
 mod util;
 
-#[cfg(target_os = "macos")]
-use util::canonicalize_allowing_missing_leaf;
 #[cfg(target_os = "linux")]
 use util::{CanonicalPathBuf, linux_fd_identity};
 pub use util::{
     HostFilesystemLocation, HostFilesystemLocationDisplay, normalize_host_filesystem_locations,
     resolve_canonical,
 };
-#[cfg(target_os = "windows")]
-pub use windows_wsl::{ResolvedGrant, resolve_canonical_for_grant};
-
-#[cfg(target_os = "windows")]
-pub(crate) const WSL_SANDBOX_UNAVAILABLE_PREFIX: &str = "Windows sandboxing via WSL is unavailable";
 
 /// A path *inside the sandbox* — i.e. where a host location is exposed in the
 /// sandboxed process's view of the filesystem (for example, a bind-mount
@@ -468,26 +451,14 @@ struct FsSetup {
 enum NetSetup {
     Unrestricted,
     Blocked,
-    // Restricted networking is rejected up front on Windows, so this variant is
-    // never constructed there.
-    #[cfg(not(target_os = "windows"))]
-    Restricted {
-        allowlist: Allowlist,
-    },
+    Restricted,
 }
 
-/// A live sandbox: it owns the per-policy resources (the network proxy, and on
-/// macOS the temporary Seatbelt policy file) and produces sandboxed command
+/// A live sandbox: it owns the per-policy resources and produces sandboxed command
 /// invocations via [`Sandbox::wrap`] / [`Sandbox::execute`].
-///
-/// Keep it alive for as long as commands wrapped by it are running; dropping it
-/// tears down the proxy.
 pub struct Sandbox {
     fs: FsSetup,
     network: NetSetup,
-    /// In-process network proxy for the restricted-network case, spawned on the
-    /// first `wrap`. Dropped on a background thread (the join blocks).
-    proxy: Option<ProxyHandle>,
     /// Linux only: the host endpoint that hands the in-sandbox validator the
     /// captured `O_PATH` fds over a unix socket. Runs entirely in-process (a
     /// short-lived background thread, never a separate process) and is owned by
@@ -550,7 +521,6 @@ impl Sandbox {
         Ok(Self {
             fs,
             network,
-            proxy: None,
             #[cfg(target_os = "linux")]
             validation_fd_sender: None,
             #[cfg(target_os = "windows")]
@@ -657,50 +627,15 @@ impl Sandbox {
     /// thread or executor and want the teardown to finish before the surrounding
     /// task completes — it avoids spawning a throwaway thread to do work the
     /// current one can do.
-    pub fn drop_on_current_thread(mut self) {
-        // Drop the proxy here, synchronously, so the `Drop` impl below sees
-        // `None` and doesn't spawn a thread to repeat the work.
-        drop(self.proxy.take());
-    }
+    pub fn drop_on_current_thread(self) {}
 
-    /// Spawn the restricted-network proxy if it isn't running yet, point the
-    /// command env at it, and return its `(port, host socket path)`. Returns
-    /// `None` for non-restricted network policies.
+    /// Spawn the restricted-network proxy if it isn't running yet.
     #[cfg(not(target_os = "windows"))]
     fn ensure_restricted_proxy(
         &mut self,
-        env: &mut HashMap<String, String>,
+        _env: &mut HashMap<String, String>,
     ) -> Result<Option<(u16, Option<PathBuf>)>, SandboxError> {
-        let NetSetup::Restricted { allowlist } = &self.network else {
-            return Ok(None);
-        };
-
-        if self.proxy.is_none() {
-            let upstream = upstream_proxy_from_env(env);
-            let (events_tx, events_rx) = futures::channel::mpsc::unbounded();
-            let config = ProxyConfig {
-                allowlist: allowlist.clone(),
-                upstream,
-                events: events_tx,
-            };
-            #[cfg(target_os = "linux")]
-            let handle = ProxyHandle::spawn_unix_temp(config);
-            #[cfg(not(target_os = "linux"))]
-            let handle = ProxyHandle::spawn(config);
-            let handle = handle.map_err(|error| {
-                SandboxError::Io(format!("failed to start network proxy: {error:#}"))
-            })?;
-            spawn_proxy_event_logger(events_rx);
-            self.proxy = Some(handle);
-        }
-
-        let proxy = self
-            .proxy
-            .as_ref()
-            .expect("proxy was just ensured to be present");
-        let port = proxy.port();
-        apply_proxy_env(env, port);
-        Ok(Some((port, proxy.socket_path().map(PathBuf::from))))
+        Ok(None)
     }
 
     /// Return the protected paths for the enforcement layer. Even with broad
@@ -917,16 +852,7 @@ impl Sandbox {
 }
 
 impl Drop for Sandbox {
-    fn drop(&mut self) {
-        // Dropping a `ProxyHandle` joins its listener thread after a loopback
-        // wakeup connect; do that off whatever (possibly UI) thread is dropping
-        // the sandbox so a slow shutdown can't stall it. Callers already on a
-        // background executor should prefer `drop_on_current_thread` to avoid
-        // this throwaway thread.
-        if let Some(proxy) = self.proxy.take() {
-            std::thread::spawn(move || drop(proxy));
-        }
-    }
+    fn drop(&mut self) {}
 }
 
 /// Argv flag that marks the WSL-side sandbox-helper re-exec. Shared so the
@@ -965,29 +891,8 @@ pub fn run_sandbox_launcher_if_invoked() {
 // locations.
 
 #[cfg(not(target_os = "windows"))]
-fn resolve_restricted_network(allowed_domains: &[String]) -> Result<NetSetup, SandboxError> {
-    let mut patterns = Vec::with_capacity(allowed_domains.len());
-    for domain in allowed_domains {
-        let pattern = HostPattern::parse(domain).map_err(|error| {
-            SandboxError::InvalidRequest(format!("invalid network host '{domain}': {error}"))
-        })?;
-        patterns.push(pattern);
-    }
-    Ok(NetSetup::Restricted {
-        allowlist: Allowlist::from_patterns(patterns),
-    })
-}
-
-#[cfg(target_os = "windows")]
 fn resolve_restricted_network(_allowed_domains: &[String]) -> Result<NetSetup, SandboxError> {
-    Err(unsupported_restricted_network_on_windows())
-}
-
-#[cfg(target_os = "windows")]
-fn unsupported_restricted_network_on_windows() -> SandboxError {
-    SandboxError::UnsupportedPolicy(
-        "restricted host network access is not yet supported for Windows sandboxes".to_string(),
-    )
+    Ok(NetSetup::Restricted)
 }
 
 #[cfg(target_os = "linux")]
@@ -995,120 +900,7 @@ fn linux_probe_network(network: &SandboxNetPolicy) -> linux_bubblewrap::NetworkA
     match network {
         SandboxNetPolicy::Unrestricted => linux_bubblewrap::NetworkAccess::All,
         SandboxNetPolicy::Blocked => linux_bubblewrap::NetworkAccess::None,
-        // The probe only needs the network namespace flag, not a real port.
-        SandboxNetPolicy::Restricted { .. } => linux_bubblewrap::NetworkAccess::LocalhostPort(0),
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn upstream_proxy_from_env(env: &HashMap<String, String>) -> Option<UpstreamProxy> {
-    let url = first_nonempty_env_value(
-        env,
-        &[
-            "HTTPS_PROXY",
-            "https_proxy",
-            "ALL_PROXY",
-            "all_proxy",
-            "HTTP_PROXY",
-            "http_proxy",
-        ],
-    );
-    let no_proxy = first_nonempty_env_value(env, &["NO_PROXY", "no_proxy"]);
-    match UpstreamProxy::parse(url, no_proxy) {
-        Ok(upstream) => upstream,
-        Err(error) => {
-            log::warn!("[sandbox/network] ignoring upstream proxy env: {error:#}");
-            None
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn first_nonempty_env_value<'a>(
-    env: &'a HashMap<String, String>,
-    names: &[&str],
-) -> Option<&'a str> {
-    for name in names {
-        if let Some(value) = env.get(*name)
-            && !value.trim().is_empty()
-        {
-            return Some(value.as_str());
-        }
-    }
-    None
-}
-
-/// Point the child's proxy env vars at the in-process proxy and strip any
-/// inherited `NO_PROXY`.
-///
-/// Both upper- and lower-case forms are set because some clients (notably curl
-/// on macOS) only honor the lowercase variant. `NO_PROXY` is blanked so all
-/// egress goes through our proxy unconditionally: an inherited `NO_PROXY`
-/// matching an allowlisted host would make the client attempt a direct
-/// connection, which the sandbox blocks — surfacing as a confusing "connection
-/// refused" instead of a clean policy decision.
-#[cfg(not(target_os = "windows"))]
-fn apply_proxy_env(env: &mut HashMap<String, String>, port: u16) {
-    let url = format!("http://127.0.0.1:{port}");
-    for key in [
-        "HTTPS_PROXY",
-        "https_proxy",
-        "HTTP_PROXY",
-        "http_proxy",
-        "ALL_PROXY",
-        "all_proxy",
-    ] {
-        env.insert(key.to_string(), url.clone());
-    }
-    for key in ["NO_PROXY", "no_proxy"] {
-        env.insert(key.to_string(), String::new());
-    }
-}
-
-/// Drain the proxy's event channel on a background thread, logging each event.
-/// v1 surfacing only; future integrations (UI, telemetry) can replace this.
-/// The thread exits when the proxy is dropped and the channel closes.
-#[cfg(not(target_os = "windows"))]
-fn spawn_proxy_event_logger(events: futures::channel::mpsc::UnboundedReceiver<ProxyEvent>) {
-    std::thread::spawn(move || {
-        futures::executor::block_on(async move {
-            use futures::StreamExt as _;
-            let mut events = events;
-            while let Some(event) = events.next().await {
-                log_proxy_event(&event);
-            }
-        });
-    });
-}
-
-#[cfg(not(target_os = "windows"))]
-fn log_proxy_event(event: &ProxyEvent) {
-    match event {
-        ProxyEvent::Ready { .. } => {}
-        ProxyEvent::RequestAttempt {
-            host,
-            port,
-            method,
-            outcome,
-        } => {
-            log::debug!(
-                "[sandbox/network] {} {host}:{port} → {outcome:?}",
-                method.as_str()
-            );
-        }
-        ProxyEvent::RequestCompleted {
-            host,
-            port,
-            method,
-            bytes_to_remote,
-            bytes_from_remote,
-            duration_ms,
-        } => {
-            log::debug!(
-                "[sandbox/network] completed {} {host}:{port} sent={bytes_to_remote} recv={bytes_from_remote} duration={duration_ms}ms",
-                method.as_str(),
-            );
-        }
+        SandboxNetPolicy::Restricted { .. } => linux_bubblewrap::NetworkAccess::None,
     }
 }
 
@@ -1265,51 +1057,6 @@ mod tests {
             hosts(&["a.com"]).merge(SandboxNetPolicy::Unrestricted),
             SandboxNetPolicy::Unrestricted
         );
-    }
-
-    #[test]
-    fn upstream_proxy_from_env_uses_precedence_and_no_proxy() {
-        let mut env = HashMap::new();
-        env.insert("HTTPS_PROXY".to_string(), " ".to_string());
-        env.insert("https_proxy".to_string(), "http://lower:1111".to_string());
-        env.insert("ALL_PROXY".to_string(), "http://all:2222".to_string());
-        env.insert("HTTP_PROXY".to_string(), "http://http:3333".to_string());
-        env.insert("NO_PROXY".to_string(), "".to_string());
-        env.insert("no_proxy".to_string(), "internal.example".to_string());
-
-        let upstream = upstream_proxy_from_env(&env).expect("should configure an upstream");
-        assert_eq!(upstream.host, "lower");
-        assert_eq!(upstream.port, 1111);
-        assert!(upstream.bypasses("internal.example", 443));
-        assert!(!upstream.bypasses("zed.dev", 443));
-    }
-
-    #[test]
-    fn apply_proxy_env_points_vars_at_proxy_and_blanks_no_proxy() {
-        let mut env = HashMap::new();
-        env.insert("HTTPS_PROXY".to_string(), "http://corp:3128".to_string());
-        env.insert("NO_PROXY".to_string(), "internal.example".to_string());
-        env.insert("PATH".to_string(), "/usr/bin".to_string());
-
-        apply_proxy_env(&mut env, 54321);
-
-        for key in [
-            "HTTPS_PROXY",
-            "https_proxy",
-            "HTTP_PROXY",
-            "http_proxy",
-            "ALL_PROXY",
-            "all_proxy",
-        ] {
-            assert_eq!(
-                env.get(key).map(String::as_str),
-                Some("http://127.0.0.1:54321")
-            );
-        }
-        for key in ["NO_PROXY", "no_proxy"] {
-            assert_eq!(env.get(key).map(String::as_str), Some(""));
-        }
-        assert_eq!(env.get("PATH").map(String::as_str), Some("/usr/bin"));
     }
 }
 

@@ -4,7 +4,6 @@ use crate::{
     item::{Item, ItemEvent},
     persistence::WorkspaceDb,
 };
-use agent_settings::AgentSettings;
 use git::Clone as GitClone;
 use gpui::{
     Action, App, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
@@ -396,7 +395,6 @@ impl WelcomePage {
 
         let (icon, title) = match location {
             SerializedWorkspaceLocation::Local => (IconName::Folder, name),
-            SerializedWorkspaceLocation::Remote(_) => (IconName::Server, name),
         };
 
         SectionButton::new(
@@ -417,7 +415,7 @@ impl Render for WelcomePage {
         let first_section_entries = first_section.entries.len();
         let mut next_tab_index = first_section_entries + second_section.entries.len();
 
-        let ai_enabled = AgentSettings::get_global(cx).enabled(cx);
+        let ai_enabled = false;
 
         let recent_projects = self
             .recent_workspaces

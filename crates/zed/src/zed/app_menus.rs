@@ -1,11 +1,9 @@
-use collab_ui::collab_panel;
 use gpui::{App, Menu, MenuItem, OsAction};
-use release_channel::ReleaseChannel;
 use terminal_view::terminal_panel;
-use zed_actions::{Quit, assistant, debug_panel, dev, git_panel, project_panel};
+use zed_actions::{Quit, git_panel, project_panel};
 
-pub fn app_menus(cx: &mut App) -> Vec<Menu> {
-    let mut view_items = vec![
+pub fn app_menus(_cx: &mut App) -> Vec<Menu> {
+    let view_items = vec![
         MenuItem::action(
             "Zoom In",
             zed_actions::IncreaseBufferFontSize { persist: false },
@@ -39,24 +37,12 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
         }),
         MenuItem::separator(),
         MenuItem::action("Project Panel", project_panel::ToggleFocus),
-        MenuItem::action("Outline Panel", outline_panel::ToggleFocus),
-        MenuItem::action("Collab Panel", collab_panel::ToggleFocus),
         MenuItem::action("Terminal Panel", terminal_panel::Toggle),
-        MenuItem::action("Debugger Panel", debug_panel::ToggleFocus),
-        MenuItem::action("Agent Panel", assistant::ToggleFocus),
         MenuItem::action("Git Panel", git_panel::ToggleFocus),
         MenuItem::separator(),
         MenuItem::action("Diagnostics", diagnostics::Deploy),
         MenuItem::separator(),
     ];
-
-    if ReleaseChannel::try_global(cx) == Some(ReleaseChannel::Dev) {
-        view_items.push(MenuItem::action(
-            "Toggle GPUI Inspector",
-            dev::ToggleInspector,
-        ));
-        view_items.push(MenuItem::separator());
-    }
 
     vec![
         Menu {
@@ -64,7 +50,6 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
             disabled: false,
             items: vec![
                 MenuItem::action("About Zed", zed_actions::About),
-                MenuItem::action("Check for Updates", auto_update::Check),
                 MenuItem::separator(),
                 MenuItem::submenu(Menu::new("Settings").items([
                     MenuItem::action("Open Settings", zed_actions::OpenSettings),
@@ -91,8 +76,6 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
                 MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
                 MenuItem::separator(),
                 MenuItem::action("Extensions", zed_actions::Extensions::default()),
-                #[cfg(not(target_os = "windows"))]
-                MenuItem::action("Install CLI", install_cli::InstallCliBinary),
                 MenuItem::separator(),
                 #[cfg(target_os = "macos")]
                 MenuItem::action("Hide Zed", super::Hide),
@@ -122,7 +105,6 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
                     workspace::Open::default(),
                 ),
                 MenuItem::action("Open Recent…", zed_actions::OpenRecent::default()),
-                MenuItem::action("Open Remote…", zed_actions::OpenRemote::default()),
                 MenuItem::separator(),
                 MenuItem::action("Add Folder to Project…", workspace::AddFolderToProject),
                 MenuItem::separator(),
@@ -268,19 +250,7 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
                         reveal_target: None,
                     },
                 ),
-                MenuItem::action("Start Debugger", debugger_ui::Start),
-                MenuItem::separator(),
                 MenuItem::action("Edit tasks.json…", zed_actions::OpenProjectTasks),
-                MenuItem::action("Edit debug.json…", zed_actions::OpenProjectDebugTasks),
-                MenuItem::separator(),
-                MenuItem::action("Continue", debugger_ui::Continue),
-                MenuItem::action("Step Over", debugger_ui::StepOver),
-                MenuItem::action("Step Into", debugger_ui::StepInto),
-                MenuItem::action("Step Out", debugger_ui::StepOut),
-                MenuItem::separator(),
-                MenuItem::action("Toggle Breakpoint", editor::actions::ToggleBreakpoint),
-                MenuItem::action("Edit Breakpoint", editor::actions::EditLogBreakpoint),
-                MenuItem::action("Clear All Breakpoints", debugger_ui::ClearAllBreakpoints),
             ],
         },
         Menu {
@@ -296,17 +266,7 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
             name: "Help".into(),
             disabled: false,
             items: vec![
-                MenuItem::action(
-                    "View Release Notes Locally",
-                    auto_update_ui::ViewReleaseNotesLocally,
-                ),
-                MenuItem::action("View Telemetry", zed_actions::OpenTelemetryLog),
                 MenuItem::action("View Dependency Licenses", zed_actions::OpenLicenses),
-                MenuItem::action("Show Welcome", onboarding::ShowWelcome),
-                MenuItem::separator(),
-                MenuItem::action("File Bug Report...", zed_actions::feedback::FileBugReport),
-                MenuItem::action("Request Feature...", zed_actions::feedback::RequestFeature),
-                MenuItem::action("Email Us...", zed_actions::feedback::EmailZed),
                 MenuItem::separator(),
                 MenuItem::action(
                     "Documentation",
@@ -314,7 +274,12 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
                         url: "https://zed.dev/docs".into(),
                     },
                 ),
-                MenuItem::action("Zed Repository", feedback::OpenZedRepo),
+                MenuItem::action(
+                    "Zed Repository",
+                    super::OpenBrowser {
+                        url: "https://github.com/zed-industries/zed".into(),
+                    },
+                ),
                 MenuItem::action(
                     "Zed Twitter",
                     super::OpenBrowser {

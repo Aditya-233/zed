@@ -283,3 +283,15 @@ impl fmt::Debug for Global {
         write!(f, "}}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lamport_clock() {
+        let mut clock = Lamport::new(ReplicaId::new(1));
+        assert_eq!(clock.tick().value, 1);
+        assert_eq!(clock.value, 2);
+    }
+}

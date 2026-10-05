@@ -261,25 +261,6 @@ pub mod dev {
     );
 }
 
-pub mod remote_debug {
-    use gpui::actions;
-
-    actions!(
-        remote_debug,
-        [
-            /// Simulates a disconnection from the remote server for testing purposes.
-            /// This will trigger the reconnection logic.
-            SimulateDisconnect,
-            /// Simulates a timeout/slow connection to the remote server for testing purposes.
-            /// This will cause heartbeat failures and trigger reconnection.
-            SimulateTimeout,
-            /// Simulates a timeout/slow connection to the remote server for testing purposes.
-            /// This will cause heartbeat failures and attempting a reconnection while having exhausted all attempts.
-            SimulateTimeoutExhausted,
-        ]
-    );
-}
-
 pub mod workspace {
     use gpui::actions;
 
@@ -668,19 +649,12 @@ pub mod assistant {
             #[action(deprecated_aliases = ["assistant::ToggleFocus"])]
             ToggleFocus,
             FocusAgent,
-            /// Opens the skill creator window for creating a new skill.
-            OpenSkillCreator,
-            /// Opens the skill creator window to import a skill from a GitHub URL.
-            CreateSkillFromUrl,
             /// Opens the user-global AGENTS.md rules file.
             #[action(name = "OpenGlobalAGENTS.mdRules")]
             OpenGlobalAgentsMdRules,
             /// Opens the project AGENTS.md rules file.
             #[action(name = "OpenProjectAGENTS.mdRules")]
             OpenProjectAgentsMdRules,
-            /// Opens the skills manager in the settings window.
-            #[action(deprecated_aliases = ["agent::OpenRulesLibrary", "assistant::OpenRulesLibrary", "assistant::DeployPromptLibrary"])]
-            ManageSkills,
         ]
     );
 
@@ -847,18 +821,6 @@ actions!(
         OpenProjectDebugTasks,
     ]
 );
-
-pub mod vim {
-    use gpui::actions;
-
-    actions!(
-        vim,
-        [
-            /// Opens the default keymap file.
-            OpenDefaultKeymap
-        ]
-    );
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WslConnectionOptions {

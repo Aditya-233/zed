@@ -12,6 +12,8 @@
 //!
 //! If you're looking to improve Vim mode, you should check out Vim crate that wraps Editor and overrides its behavior.
 pub mod actions;
+pub mod askpass_modal;
+pub use askpass_modal::AskPassModal;
 pub mod blink_manager;
 mod bracket_colorization;
 mod clangd_ext;
@@ -67,6 +69,7 @@ mod completions;
 mod config;
 mod diagnostics;
 mod edit_prediction;
+pub mod edit_prediction_types;
 mod input;
 mod markdown_actions;
 mod navigation;
@@ -146,7 +149,6 @@ use code_context_menus::{
 use code_lens::CodeLensState;
 use collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use convert_case::{Case, Casing};
-use dap::TelemetrySpawnLocation;
 use display_map::*;
 use document_colors::LspColorData;
 use document_links::LspDocumentLinks;
@@ -2598,31 +2600,26 @@ impl Editor {
                     editor.refresh_sticky_headers(&editor.snapshot(window, cx), cx);
                 }
                 EditorEvent::Edited { .. } => {
-                    let vim_mode = vim_mode_setting::VimModeSetting::try_get(cx)
-                        .map(|vim_mode| vim_mode.0)
+                    let display_map = editor.display_snapshot(cx);
+                    let selections = editor.selections.all_adjusted_display(&display_map);
+                    let pop_state = editor
+                        .change_list
+                        .last()
+                        .map(|previous| {
+                            previous.len() == selections.len()
+                                && previous.iter().enumerate().all(|(ix, p)| {
+                                    p.to_display_point(&display_map).row()
+                                        == selections[ix].head().row()
+                                })
+                        })
                         .unwrap_or(false);
-                    if !vim_mode {
-                        let display_map = editor.display_snapshot(cx);
-                        let selections = editor.selections.all_adjusted_display(&display_map);
-                        let pop_state = editor
-                            .change_list
-                            .last()
-                            .map(|previous| {
-                                previous.len() == selections.len()
-                                    && previous.iter().enumerate().all(|(ix, p)| {
-                                        p.to_display_point(&display_map).row()
-                                            == selections[ix].head().row()
-                                    })
-                            })
-                            .unwrap_or(false);
-                        let new_positions = selections
-                            .into_iter()
-                            .map(|s| display_map.display_point_to_anchor(s.head(), Bias::Left))
-                            .collect();
-                        editor
-                            .change_list
-                            .push_to_change_list(pop_state, new_positions);
-                    }
+                    let new_positions = selections
+                        .into_iter()
+                        .map(|s| display_map.display_point_to_anchor(s.head(), Bias::Left))
+                        .collect();
+                    editor
+                        .change_list
+                        .push_to_change_list(pop_state, new_positions);
                 }
                 _ => (),
             },
@@ -10644,9 +10641,7 @@ impl Editor {
             .and_then(|e| e.to_str())
             .map(|a| a.to_string()));
 
-        let vim_mode = vim_mode_setting::VimModeSetting::try_get(cx)
-            .map(|vim_mode| vim_mode.0)
-            .unwrap_or(false);
+        let vim_mode = false;
 
         let edit_predictions_provider = all_language_settings(file, cx).edit_predictions.provider;
         let copilot_enabled = edit_predictions_provider

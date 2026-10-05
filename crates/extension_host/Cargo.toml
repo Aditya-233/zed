@@ -37,7 +37,6 @@ moka.workspace = true
 node_runtime.workspace = true
 paths.workspace = true
 project.workspace = true
-remote.workspace = true
 release_channel.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -65,16 +64,11 @@ language = { workspace = true, features = ["test-support"] }
 language_extension.workspace = true
 parking_lot.workspace = true
 project = { workspace = true, features = ["test-support"] }
-remote = { workspace = true, features = ["test-support"] }
 reqwest_client.workspace = true
 theme = { workspace = true, features = ["test-support"] }
 theme_settings.workspace = true
 theme_extension.workspace = true
 zlog.workspace = true
-
-[[bench]]
-name = "extension_compilation_benchmark"
-harness = false
 
 [package.metadata.cargo-shear]
 ignored = ["tracing"]
