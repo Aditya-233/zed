@@ -22,22 +22,22 @@ if [[ -n $apt ]]; then
   deps=(
     gcc
     g++
-    libasound2-dev
     libfontconfig-dev
     libgit2-dev
     libglib2.0-dev
     libssl-dev
     libva-dev
     libvulkan1
+    mesa-vulkan-drivers
     libwayland-dev
-    libx11-xcb-dev
-    libxkbcommon-x11-dev
+    libxkbcommon-dev
     libzstd-dev
     make
     cmake
     clang
     lld
     llvm
+    mold
     jq
     git
     curl
@@ -47,7 +47,6 @@ if [[ -n $apt ]]; then
     musl-tools
     musl-dev
     build-essential
-    pipewire
     xdg-desktop-portal
   )
   if (grep -qP 'PRETTY_NAME="(Debian|Raspbian).+13' /etc/os-release); then
@@ -201,19 +200,16 @@ if [[ -n $pacman ]]; then
     clang
     musl
     cmake
-    alsa-lib
     fontconfig
     glib2
     libva
     wayland
     libgit2
-    libxcb
-    libxkbcommon-x11
+    libxkbcommon
     openssl
     zstd
     pkgconf
     sqlite
-    pipewire
     xdg-desktop-portal
     jq
     git
