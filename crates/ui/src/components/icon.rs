@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use decorated_icon::*;
-use gpui::{AnimationElement, AnyElement, Hsla, IntoElement, Rems, TimedTransformation, Transformation, img, svg};
+use gpui::{
+    AnimationElement, AnyElement, Hsla, ImgResourceLoader, IntoElement, Rems, Resource,
+    TimedTransformation, Transformation, img, svg,
+};
 pub use icon_decoration::*;
 pub use icons::*;
 
@@ -188,6 +191,12 @@ impl Icon {
             size: IconSize::default().rems(),
             transformation: Transformation::default(),
             rotation_period: None,
+        }
+    }
+
+    pub fn preload(&self, cx: &mut App) {
+        if let IconSource::External(path) = &self.source {
+            drop(cx.fetch_asset::<ImgResourceLoader>(&Resource::Path(path.clone())));
         }
     }
 
