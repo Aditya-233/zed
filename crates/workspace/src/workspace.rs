@@ -8817,8 +8817,20 @@ impl Workspace {
                 let project = self.project().read(cx);
                 let remote_host: Option<project::trusted_worktrees::RemoteHostLocation> = None;
                 let worktree_store = project.worktree_store().downgrade();
+                let home_dir_task = if project.is_local() {
+                    Task::ready(std::env::home_dir())
+                } else {
+                    let resolve_task = project.resolve_abs_path("~", cx);
+                    cx.spawn(async |_, _| {
+                        let resolved_path = resolve_task
+                            .await
+                            .and_then(|path| path.into_abs_path())
+                            .map(PathBuf::from);
+                        resolved_path
+                    })
+                };
                 self.toggle_modal(window, cx, |window, cx| {
-                    SecurityModal::new(worktree_store, remote_host, window, cx)
+                    SecurityModal::new(worktree_store, remote_host, home_dir_task, window, cx)
                 });
             }
         }
