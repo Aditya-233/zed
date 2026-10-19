@@ -1514,6 +1514,96 @@ impl DisplaySnapshot {
         self.companion_display_snapshot.as_deref()
     }
 
+
+    pub fn inlay_hint_at(&self, point: DisplayPoint) -> Option<(&Inlay, usize)> {
+        if point.row() > self.max_point().row()
+            || self.is_block_line(point.row())
+            || point.column() >= self.line_len(point.row())
+        {
+            return None;
+        }
+        let wrap_row = self
+            .block_snapshot
+            .to_wrap_point(BlockPoint::new(BlockRow(point.row().0), 0), Bias::Left)
+            .row();
+        let wrap_indent = wrap_row
+            .0
+            .checked_sub(1)
+            .and_then(|previous_row| self.wrap_snapshot().soft_wrap_indent(WrapRow(previous_row)));
+        if wrap_indent.is_some_and(|indent| point.column() < indent) {
+            return None;
+        }
+        let fold_point = self.display_point_to_fold_point(point, Bias::Left);
+        if self
+            .fold_snapshot()
+            .placeholder_range_at(fold_point)
+            .is_some()
+        {
+            return None;
+        }
+        let inlay_offset = self
+            .inlay_snapshot()
+            .to_offset(fold_point.to_inlay_point(self.fold_snapshot()));
+        if self.fold_snapshot().is_inlay_offset_folded(inlay_offset) {
+            return None;
+        }
+        self.inlay_snapshot().inlay_hint_at_offset(inlay_offset)
+    }
+
+    pub fn is_inlay_visible(&self, inlay_id: InlayId, position: Anchor) -> bool {
+        if !position.is_valid(self.buffer_snapshot()) {
+            return false;
+        }
+        let Some(rendered_range) = self.inlay_snapshot().inlay_offset_range(inlay_id, position)
+        else {
+            return false;
+        };
+        let start = self.inlay_offset_to_display_point(rendered_range.start, Bias::Right);
+        let end = self.inlay_offset_to_display_point(rendered_range.end, Bias::Left);
+        (start.row().0..=end.row().0).any(|row| {
+            let row = DisplayRow(row);
+            if self.is_block_line(row) {
+                return false;
+            }
+            let point = if row == start.row() {
+                start
+            } else {
+                DisplayPoint::new(row, 0)
+            };
+            let offset = self.display_point_to_inlay_offset(point, Bias::Left);
+            rendered_range.contains(&offset) && !self.fold_snapshot().is_inlay_offset_folded(offset)
+        })
+    }
+
+    pub(crate) fn diagnostics_visible(&self) -> bool {
+        self.diagnostics_max_severity.into_lsp().is_some()
+    }
+
+    fn diagnostic_severity_is_visible(&self, severity: lsp::DiagnosticSeverity) -> bool {
+        self.diagnostics_max_severity
+            .into_lsp()
+            .is_some_and(|max_severity| severity <= max_severity)
+    }
+
+    pub(crate) fn diagnostic_underline_style(
+        &self,
+        severity: lsp::DiagnosticSeverity,
+        underline: bool,
+        is_unnecessary: bool,
+        editor_style: &EditorStyle,
+    ) -> Option<UnderlineStyle> {
+        (underline
+            && editor_style.show_underlines
+            && self.diagnostic_severity_is_visible(severity)
+            && !(is_unnecessary && severity > lsp::DiagnosticSeverity::WARNING))
+            .then(|| UnderlineStyle {
+                color: Some(diagnostic_style(severity, &editor_style.status)),
+                thickness: 1.0.into(),
+                wavy: true,
+            })
+    }
+
+
     pub fn wrap_snapshot(&self) -> &WrapSnapshot {
         &self.block_snapshot.wrap_snapshot
     }
