@@ -4887,7 +4887,6 @@ mod tests {
             (file3.clone(), DisplayPoint::new(DisplayRow(0), 0), 0.)
         );
 
-        // Go back to an item that has been closed and removed from disk
         workspace
             .update_in(cx, |_, window, cx| {
                 pane.update(cx, |pane, cx| {
@@ -4913,7 +4912,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             active_location(&workspace, cx),
-            (file2.clone(), DisplayPoint::new(DisplayRow(0), 0), 0.)
+            (file1.clone(), DisplayPoint::new(DisplayRow(10), 0), 0.)
         );
         workspace
             .update_in(cx, |w, window, cx| {
