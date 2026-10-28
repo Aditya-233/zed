@@ -54,9 +54,10 @@ futures.workspace = true
 fuzzy.workspace = true
 fuzzy_nucleo.workspace = true
 git.workspace = true
+github_releases.workspace = true
 globset.workspace = true
 gpui.workspace = true
-http_client = { workspace = true, features = ["github-download"] }
+http_client.workspace = true
 image.workspace = true
 indexmap.workspace = true
 itertools.workspace = true

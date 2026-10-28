@@ -37,6 +37,7 @@ members = [
     "crates/fuzzy",
     "crates/fuzzy_nucleo",
     "crates/git",
+    "crates/github_releases",
     "crates/go_to_line",
     "crates/gpui",
     "crates/gpui_linux",
@@ -201,6 +202,7 @@ fs = { path = "crates/fs" }
 fuzzy = { path = "crates/fuzzy" }
 fuzzy_nucleo = { path = "crates/fuzzy_nucleo" }
 git = { path = "crates/git" }
+github_releases = { path = "crates/github_releases" }
 go_to_line = { path = "crates/go_to_line" }
 gpui = { path = "crates/gpui", default-features = false }
 gpui_linux = { path = "crates/gpui_linux" }
