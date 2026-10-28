@@ -89,7 +89,7 @@ use crate::linux::{
     wayland::{
         clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, TEXT_MIME_TYPES},
         cursor::Cursor,
-        serial::{Serial, SerialKind, SerialTracker},
+        serial::{ActivationContext, Serial, SerialKind, SerialTracker},
         to_shape,
         window::WaylandWindow,
     },
@@ -361,7 +361,6 @@ pub(crate) struct WaylandClientState {
     data_offers: Vec<DataOffer<WlDataOffer>>,
     primary_data_offer: Option<DataOffer<ZwpPrimarySelectionOfferV1>>,
     cursor: Cursor,
-    pending_activation: Option<PendingActivation>,
     startup_activation_token: Option<String>,
     event_loop: Option<EventLoop<'static, WaylandClientStatePtr>>,
     pub common: LinuxCommon,
@@ -573,6 +572,14 @@ impl WaylandClientStatePtr {
         self.0.upgrade().unwrap().borrow().serial_tracker.get(kind)
     }
 
+    pub fn activation_context(&self) -> Option<ActivationContext> {
+        self.0
+            .upgrade()?
+            .borrow()
+            .serial_tracker
+            .activation_context()
+    }
+
     pub fn start_external_drag(
         &self,
         surface: &wl_surface::WlSurface,
@@ -611,11 +618,6 @@ impl WaylandClientStatePtr {
             window,
         });
         true
-    }
-
-    pub fn set_pending_activation(&self, window: ObjectId) {
-        self.0.upgrade().unwrap().borrow_mut().pending_activation =
-            Some(PendingActivation::Window(window));
     }
 
     pub fn enable_ime(&self) {
@@ -1049,7 +1051,6 @@ impl WaylandClient {
             data_offers: Vec::new(),
             primary_data_offer: None,
             cursor,
-            pending_activation: None,
             startup_activation_token,
             event_loop: Some(event_loop),
             ime_enabled: None,
@@ -1217,16 +1218,15 @@ impl LinuxClient for WaylandClient {
     }
 
     fn open_uri(&self, uri: &str) {
-        let mut state = self.0.borrow_mut();
-        if let (Some(activation), Some(window)) = (
+        let state = self.0.borrow();
+        if let (Some(activation), Some(context)) = (
             state.globals.activation.clone(),
-            state.mouse_focused_window.clone(),
+            state.serial_tracker.activation_context(),
         ) {
-            state.pending_activation = Some(PendingActivation::Uri(uri.to_string()));
-            let token = activation.get_activation_token(&state.globals.qh, ());
-            let serial = state.serial_tracker.get(SerialKind::MousePress);
-            token.set_serial(serial.as_raw(), &state.wl_seat);
-            token.set_surface(&window.surface());
+            let token = activation
+                .get_activation_token(&state.globals.qh, PendingActivation::Uri(uri.to_string()));
+            token.set_serial(context.serial.as_raw(), &state.wl_seat);
+            token.set_surface(&context.requesting_surface);
             token.commit();
         } else {
             let executor = state.common.background_executor.clone();
@@ -1235,16 +1235,15 @@ impl LinuxClient for WaylandClient {
     }
 
     fn reveal_path(&self, path: PathBuf) {
-        let mut state = self.0.borrow_mut();
-        if let (Some(activation), Some(window)) = (
+        let state = self.0.borrow();
+        if let (Some(activation), Some(context)) = (
             state.globals.activation.clone(),
-            state.mouse_focused_window.clone(),
+            state.serial_tracker.activation_context(),
         ) {
-            state.pending_activation = Some(PendingActivation::Path(path));
-            let token = activation.get_activation_token(&state.globals.qh, ());
-            let serial = state.serial_tracker.get(SerialKind::MousePress);
-            token.set_serial(serial.as_raw(), &state.wl_seat);
-            token.set_surface(&window.surface());
+            let token =
+                activation.get_activation_token(&state.globals.qh, PendingActivation::Path(path));
+            token.set_serial(context.serial.as_raw(), &state.wl_seat);
+            token.set_surface(&context.requesting_surface);
             token.commit();
         } else {
             let executor = state.common.background_executor.clone();
@@ -1708,12 +1707,14 @@ impl Dispatch<xdg_wm_base::XdgWmBase, ()> for WaylandClientStatePtr {
     }
 }
 
-impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for WaylandClientStatePtr {
+impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, PendingActivation>
+    for WaylandClientStatePtr
+{
     fn event(
         this: &mut Self,
         token: &xdg_activation_token_v1::XdgActivationTokenV1,
         event: <xdg_activation_token_v1::XdgActivationTokenV1 as Proxy>::Event,
-        _: &(),
+        pending_activation: &PendingActivation,
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
@@ -1722,19 +1723,22 @@ impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for WaylandClie
 
         if let xdg_activation_token_v1::Event::Done { token } = event {
             let executor = state.common.background_executor.clone();
-            match state.pending_activation.take() {
-                Some(PendingActivation::Uri(uri)) => open_uri_internal(executor, &uri, Some(token)),
-                Some(PendingActivation::Path(path)) => {
-                    reveal_path_internal(executor, path, Some(token))
+            match pending_activation {
+                PendingActivation::Uri(uri) => {
+                    open_uri_internal(executor, uri, Some(token))
                 }
-                Some(PendingActivation::Window(window)) => {
-                    let Some(window) = get_window(&mut state, &window) else {
-                        return;
-                    };
-                    let activation = state.globals.activation.as_ref().unwrap();
-                    activation.activate(token, &window.surface());
+                PendingActivation::Path(path) => {
+                    reveal_path_internal(executor, path.clone(), Some(token))
                 }
-                None => log::error!("activation token received with no pending activation"),
+                }
+                PendingActivation::Window(window) => {
+                    let activation = state.globals.activation.clone();
+                    if let (Some(window), Some(activation)) =
+                        (get_window(&mut state, window), activation)
+                    {
+                        activation.activate(token, &window.surface());
+                    }
+                }
             }
         }
 
@@ -1923,7 +1927,15 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                 ..
             } => {
                 if key_state == wl_keyboard::KeyState::Pressed {
-                    state.serial_tracker.update(SerialKind::KeyPress, serial);
+                    let focused_surface = state
+                        .keyboard_focused_window
+                        .as_ref()
+                        .map(|window| window.surface());
+                    state.serial_tracker.update_with_focused_surface(
+                        SerialKind::KeyPress,
+                        serial,
+                        focused_surface,
+                    );
                 }
 
                 let focused_window = state.keyboard_focused_window.clone();
@@ -2280,7 +2292,15 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                 // Record presses only. Requests referencing this serial (popup grabs,
                 // interactive moves) are declined when given a release serial.
                 if button_state == wl_pointer::ButtonState::Pressed {
-                    state.serial_tracker.update(SerialKind::MousePress, serial);
+                    let focused_surface = state
+                        .mouse_focused_window
+                        .as_ref()
+                        .map(|window| window.surface());
+                    state.serial_tracker.update_with_focused_surface(
+                        SerialKind::MousePress,
+                        serial,
+                        focused_surface,
+                    );
                 }
                 let button = linux_button_to_gpui(button);
                 let Some(button) = button else { return };
