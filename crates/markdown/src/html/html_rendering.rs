@@ -558,12 +558,12 @@ fn apply_html_highlight_style(
     if let Some(background) = style.background_color {
         refinement.background_color = Some(background);
     } else if style.mark {
-        if let Some(mark_bg) = mark_background {
-            refinement.background_color = Some(mark_bg);
+        if let Some(background) = mark_background {
+            refinement.background_color = Some(background);
         }
     } else if style.code {
-        if let Some(code_bg) = code_background {
-            refinement.background_color = Some(code_bg);
+        if let Some(background) = code_background {
+            refinement.background_color = Some(background);
         }
     }
 }

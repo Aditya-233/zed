@@ -7547,8 +7547,8 @@ mod tests {
 
     #[gpui::test]
     fn test_tight_and_loose_list_rendering(cx: &mut TestAppContext) {
-        let tight_md = "* item 1\n* item 2";
-        let tight_rendered = render_markdown(tight_md, cx);
+        let tight_markdown = "* item 1\n* item 2";
+        let tight_rendered = render_markdown(tight_markdown, cx);
         let tight_text: String = tight_rendered
             .lines
             .iter()
@@ -7557,8 +7557,8 @@ mod tests {
         assert!(tight_text.contains("item 1"), "tight list should render item 1");
         assert!(tight_text.contains("item 2"), "tight list should render item 2");
 
-        let loose_md = "* item 1\n\n* item 2";
-        let loose_rendered = render_markdown(loose_md, cx);
+        let loose_markdown = "* item 1\n\n* item 2";
+        let loose_rendered = render_markdown(loose_markdown, cx);
         let loose_text: String = loose_rendered
             .lines
             .iter()
@@ -7588,8 +7588,8 @@ mod tests {
             parse_html: true,
             ..Default::default()
         };
-        let md = "<kbd>Ctrl</kbd> + <mark>highlight</mark> and <span style=\"font-weight: bold;\">bold span</span>";
-        let rendered = render_markdown_with_options(md, None, options, cx);
+        let markdown_input = "<kbd>Ctrl</kbd> + <mark>highlight</mark> and <span style=\"font-weight: bold;\">bold span</span>";
+        let rendered = render_markdown_with_options(markdown_input, None, options, cx);
         let text: String = rendered
             .lines
             .iter()
@@ -7607,8 +7607,8 @@ mod tests {
             parse_html: true,
             ..Default::default()
         };
-        let md = "<details>\n<summary>Click to view</summary>\n<p>Hidden body</p>\n</details>";
-        let rendered = render_markdown_with_options(md, None, options, cx);
+        let markdown_input = "<details>\n<summary>Click to view</summary>\n<p>Hidden body</p>\n</details>";
+        let rendered = render_markdown_with_options(markdown_input, None, options, cx);
         let text: String = rendered
             .lines
             .iter()

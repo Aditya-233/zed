@@ -2110,16 +2110,16 @@ mod tests {
 
     #[test]
     fn test_tight_vs_loose_lists() {
-        let tight_md = "* alpha\n* beta";
-        let tight_parsed = parse_markdown_with_options(tight_md, false, false, false, false);
+        let tight_markdown = "* alpha\n* beta";
+        let tight_parsed = parse_markdown_with_options(tight_markdown, false, false, false, false);
         let tight_list = tight_parsed.events.iter().find_map(|(_, event)| match event {
             Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
             _ => None,
         });
         assert_eq!(tight_list, Some(true), "tight list must have is_tight = true");
 
-        let loose_md = "* alpha\n\n* beta";
-        let loose_parsed = parse_markdown_with_options(loose_md, false, false, false, false);
+        let loose_markdown = "* alpha\n\n* beta";
+        let loose_parsed = parse_markdown_with_options(loose_markdown, false, false, false, false);
         let loose_list = loose_parsed.events.iter().find_map(|(_, event)| match event {
             Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
             _ => None,
