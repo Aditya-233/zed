@@ -1271,6 +1271,7 @@ impl Markdown {
         let should_render_math = self.options.render_math;
         let should_parse_heading_slugs = self.options.parse_heading_slugs;
         let should_parse_metadata_blocks = self.options.render_metadata_blocks;
+        let strict_commonmark = self.options.strict_commonmark;
         let language_registry = self.language_registry.clone();
         let fallback = self.fallback_code_block_language.clone();
 
@@ -1301,7 +1302,7 @@ impl Markdown {
                 should_parse_html,
                 should_parse_heading_slugs,
                 should_parse_metadata_blocks,
-                self.options.strict_commonmark,
+                strict_commonmark,
             );
             let events = parsed.events;
             let language_names = parsed.language_names;
@@ -2637,6 +2638,7 @@ impl Element for MarkdownElement {
             mermaid_state,
             render_math,
             math_state,
+            parse_html,
         ) = {
             let markdown = self.markdown.read(cx);
             (
@@ -2647,6 +2649,7 @@ impl Element for MarkdownElement {
                 markdown.mermaid_state.clone(),
                 markdown.options.render_math,
                 markdown.math_state.clone(),
+                markdown.options.parse_html,
             )
         };
         let markdown_end = if let Some(last) = parsed_markdown.events.last() {
@@ -3337,7 +3340,7 @@ impl Element for MarkdownElement {
                         continue;
                     }
 
-                    if self.options.parse_html {
+                    if parse_html {
                         if lowercase_html.starts_with("<mark>") {
                             builder.push_text_style(TextStyleRefinement {
                                 background_color: Some(cx.theme().colors().search_match_background),
@@ -3349,7 +3352,9 @@ impl Element for MarkdownElement {
                             builder.pop_text_style();
                             continue;
                         }
-                        if lowercase_html.starts_with("<b>") || lowercase_html.starts_with("<strong>") {
+                        if lowercase_html.starts_with("<b>")
+                            || lowercase_html.starts_with("<strong>")
+                        {
                             builder.push_text_style(TextStyleRefinement {
                                 font_weight: Some(FontWeight::BOLD),
                                 color: Some(cx.theme().colors().text),
@@ -3357,22 +3362,27 @@ impl Element for MarkdownElement {
                             });
                             continue;
                         }
-                        if lowercase_html.starts_with("</b>") || lowercase_html.starts_with("</strong>") {
+                        if lowercase_html.starts_with("</b>")
+                            || lowercase_html.starts_with("</strong>")
+                        {
                             builder.pop_text_style();
                             continue;
                         }
-                        if lowercase_html.starts_with("<i>") || lowercase_html.starts_with("<em>") {
+                        if lowercase_html.starts_with("<i>") || lowercase_html.starts_with("<em>")
+                        {
                             builder.push_text_style(TextStyleRefinement {
                                 font_style: Some(FontStyle::Italic),
                                 ..Default::default()
                             });
                             continue;
                         }
-                        if lowercase_html.starts_with("</i>") || lowercase_html.starts_with("</em>") {
+                        if lowercase_html.starts_with("</i>") || lowercase_html.starts_with("</em>")
+                        {
                             builder.pop_text_style();
                             continue;
                         }
-                        if lowercase_html.starts_with("<u>") || lowercase_html.starts_with("<ins>") {
+                        if lowercase_html.starts_with("<u>") || lowercase_html.starts_with("<ins>")
+                        {
                             builder.push_text_style(TextStyleRefinement {
                                 underline: Some(UnderlineStyle {
                                     thickness: px(1.),
@@ -3383,7 +3393,9 @@ impl Element for MarkdownElement {
                             });
                             continue;
                         }
-                        if lowercase_html.starts_with("</u>") || lowercase_html.starts_with("</ins>") {
+                        if lowercase_html.starts_with("</u>")
+                            || lowercase_html.starts_with("</ins>")
+                        {
                             builder.pop_text_style();
                             continue;
                         }
@@ -7554,8 +7566,14 @@ mod tests {
             .iter()
             .map(|line| line.layout.wrapped_text())
             .collect();
-        assert!(tight_text.contains("item 1"), "tight list should render item 1");
-        assert!(tight_text.contains("item 2"), "tight list should render item 2");
+        assert!(
+            tight_text.contains("item 1"),
+            "tight list should render item 1"
+        );
+        assert!(
+            tight_text.contains("item 2"),
+            "tight list should render item 2"
+        );
 
         let loose_markdown = "* item 1\n\n* item 2";
         let loose_rendered = render_markdown(loose_markdown, cx);
@@ -7564,8 +7582,14 @@ mod tests {
             .iter()
             .map(|line| line.layout.wrapped_text())
             .collect();
-        assert!(loose_text.contains("item 1"), "loose list should render item 1");
-        assert!(loose_text.contains("item 2"), "loose list should render item 2");
+        assert!(
+            loose_text.contains("item 1"),
+            "loose list should render item 1"
+        );
+        assert!(
+            loose_text.contains("item 2"),
+            "loose list should render item 2"
+        );
     }
 
     #[gpui::test]
@@ -7607,7 +7631,8 @@ mod tests {
             parse_html: true,
             ..Default::default()
         };
-        let markdown_input = "<details>\n<summary>Click to view</summary>\n<p>Hidden body</p>\n</details>";
+        let markdown_input =
+            "<details>\n<summary>Click to view</summary>\n<p>Hidden body</p>\n</details>";
         let rendered = render_markdown_with_options(markdown_input, None, options, cx);
         let text: String = rendered
             .lines

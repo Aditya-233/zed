@@ -164,10 +164,7 @@ impl MarkdownElement {
         );
         if let Some(summary) = &details.summary {
             builder.push_div(
-                div()
-                    .font_weight(FontWeight::BOLD)
-                    .mb_1()
-                    .child("▶ "),
+                div().font_weight(FontWeight::BOLD).mb_1().child("▶ "),
                 &details.source_range,
                 markdown_end,
             );
@@ -180,7 +177,13 @@ impl MarkdownElement {
             );
             builder.pop_div();
         }
-        self.render_html_elements(&details.children, source_allocator, builder, markdown_end, cx);
+        self.render_html_elements(
+            &details.children,
+            source_allocator,
+            builder,
+            markdown_end,
+            cx,
+        );
         builder.pop_div();
     }
 

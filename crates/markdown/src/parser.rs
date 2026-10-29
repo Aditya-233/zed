@@ -1063,7 +1063,13 @@ mod tests {
     #[test]
     fn test_yaml_style_metadata_block() {
         assert_eq!(
-            parse_markdown_with_options("---\ntitle: Post\n---\n# Heading", false, false, true, false),
+            parse_markdown_with_options(
+                "---\ntitle: Post\n---\n# Heading",
+                false,
+                false,
+                true,
+                false
+            ),
             ParsedMarkdownData {
                 events: vec![
                     (0..19, RootStart),
@@ -1106,8 +1112,13 @@ mod tests {
 
     #[test]
     fn test_metadata_block_text_is_verbatim() {
-        let parsed =
-            parse_markdown_with_options("---\nurl: https://zed.dev\n---\nBody", false, false, true, false);
+        let parsed = parse_markdown_with_options(
+            "---\nurl: https://zed.dev\n---\nBody",
+            false,
+            false,
+            true,
+            false,
+        );
         assert!(
             parsed
                 .events
@@ -1149,8 +1160,13 @@ mod tests {
 
     #[test]
     fn test_metadata_blocks_store_fallback_for_nested_yaml() {
-        let parsed =
-            parse_markdown_with_options("---\ntags:\n  - zed\n---\nBody", false, false, true, false);
+        let parsed = parse_markdown_with_options(
+            "---\ntags:\n  - zed\n---\nBody",
+            false,
+            false,
+            true,
+            false,
+        );
 
         assert_eq!(
             parsed.metadata_blocks,
@@ -1833,7 +1849,8 @@ mod tests {
 
     #[test]
     fn test_heading_slug_collision_with_dedup_suffix() {
-        let parsed = parse_markdown_with_options("# Foo\n\n## Foo\n\n## Foo 1", false, true, false, false);
+        let parsed =
+            parse_markdown_with_options("# Foo\n\n## Foo\n\n## Foo 1", false, true, false, false);
         assert_eq!(parsed.heading_slugs.len(), 3);
         assert!(parsed.heading_slugs.contains_key("foo"));
         assert!(parsed.heading_slugs.contains_key("foo-1"));
@@ -2112,19 +2129,33 @@ mod tests {
     fn test_tight_vs_loose_lists() {
         let tight_markdown = "* alpha\n* beta";
         let tight_parsed = parse_markdown_with_options(tight_markdown, false, false, false, false);
-        let tight_list = tight_parsed.events.iter().find_map(|(_, event)| match event {
-            Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
-            _ => None,
-        });
-        assert_eq!(tight_list, Some(true), "tight list must have is_tight = true");
+        let tight_list = tight_parsed
+            .events
+            .iter()
+            .find_map(|(_, event)| match event {
+                Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
+                _ => None,
+            });
+        assert_eq!(
+            tight_list,
+            Some(true),
+            "tight list must have is_tight = true"
+        );
 
         let loose_markdown = "* alpha\n\n* beta";
         let loose_parsed = parse_markdown_with_options(loose_markdown, false, false, false, false);
-        let loose_list = loose_parsed.events.iter().find_map(|(_, event)| match event {
-            Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
-            _ => None,
-        });
-        assert_eq!(loose_list, Some(false), "loose list must have is_tight = false");
+        let loose_list = loose_parsed
+            .events
+            .iter()
+            .find_map(|(_, event)| match event {
+                Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
+                _ => None,
+            });
+        assert_eq!(
+            loose_list,
+            Some(false),
+            "loose list must have is_tight = false"
+        );
     }
 
     #[test]
