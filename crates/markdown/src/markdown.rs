@@ -3368,8 +3368,7 @@ impl Element for MarkdownElement {
                             builder.pop_text_style();
                             continue;
                         }
-                        if lowercase_html.starts_with("<i>") || lowercase_html.starts_with("<em>")
-                        {
+                        if lowercase_html.starts_with("<i>") || lowercase_html.starts_with("<em>") {
                             builder.push_text_style(TextStyleRefinement {
                                 font_style: Some(FontStyle::Italic),
                                 ..Default::default()

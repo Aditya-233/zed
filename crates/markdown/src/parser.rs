@@ -249,7 +249,6 @@ pub(crate) fn parse_markdown_with_options(
     let mut within_link = false;
     let mut within_code_block = false;
     let mut within_metadata = false;
-    let mut within_table = false;
     let mut current_metadata_block_start = None;
     let mut metadata_block_content_range: Option<Range<usize>> = None;
     struct OpenList {
@@ -428,10 +427,7 @@ pub(crate) fn parse_markdown_with_options(
                     pulldown_cmark::Tag::FootnoteDefinition(label) => {
                         MarkdownTag::FootnoteDefinition(SharedString::from(label.to_string()))
                     }
-                    pulldown_cmark::Tag::Table(alignments) => {
-                        within_table = true;
-                        MarkdownTag::Table(alignments)
-                    }
+                    pulldown_cmark::Tag::Table(alignments) => MarkdownTag::Table(alignments),
                     pulldown_cmark::Tag::TableHead => MarkdownTag::TableHead,
                     pulldown_cmark::Tag::TableRow => MarkdownTag::TableRow,
                     pulldown_cmark::Tag::TableCell => MarkdownTag::TableCell,
@@ -492,16 +488,13 @@ pub(crate) fn parse_markdown_with_options(
                     if !parse_metadata_blocks {
                         continue;
                     }
-                } else if let pulldown_cmark::TagEnd::Table = tag {
-                    within_table = false;
                 } else if let pulldown_cmark::TagEnd::List(_) = tag {
                     if let Some(open_list) = open_lists.pop() {
                         let is_tight = !open_list.has_paragraph;
                         if let Some((
                             _,
                             MarkdownEvent::Start(MarkdownTag::List {
-                                is_tight: ref mut tight,
-                                ..
+                                is_tight: tight, ..
                             }),
                         )) = state.events.get_mut(open_list.event_index)
                         {
