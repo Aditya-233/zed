@@ -280,7 +280,7 @@ mod tests {
     use util::test::marked_text_ranges;
 
     fn markdown_for(source: &str, selection: Range<usize>) -> String {
-        let parsed = parse_markdown_with_options(source, false, false, false);
+        let parsed = parse_markdown_with_options(source, false, false, false, false);
         rebalanced_markdown_for_selection(
             source,
             &parsed.events,
@@ -313,7 +313,7 @@ mod tests {
     }
 
     fn inline_spans(source: &str) -> Vec<InlineSpan> {
-        let parsed = parse_markdown_with_options(source, false, false, false);
+        let parsed = parse_markdown_with_options(source, false, false, false, false);
         collect_inline_spans(source, &parsed.events)
     }
 
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn test_root_block_events_slices_each_block() {
         let source = "first **a**\n\nsecond `b`\n\nthird *c*";
-        let parsed = parse_markdown_with_options(source, false, false, false);
+        let parsed = parse_markdown_with_options(source, false, false, false, false);
         let events = parsed.events.as_slice();
         let starts = parsed.root_block_starts.as_slice();
         assert_eq!(starts, &[0, 13, 25]);

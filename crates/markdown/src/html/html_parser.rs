@@ -26,6 +26,15 @@ pub(crate) enum ParsedHtmlElement {
     BlockQuote(ParsedHtmlBlockQuote),
     Paragraph(ParsedHtmlParagraph),
     Image(HtmlImage),
+    Details(ParsedHtmlDetails),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
+pub(crate) struct ParsedHtmlDetails {
+    pub source_range: Range<usize>,
+    pub summary: Option<ParsedHtmlParagraph>,
+    pub children: Vec<ParsedHtmlElement>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +56,7 @@ impl ParsedHtmlElement {
                 HtmlParagraphChunk::Image(image) => image.source_range.clone(),
             },
             Self::Image(image) => image.source_range.clone(),
+            Self::Details(details) => details.source_range.clone(),
         })
     }
 }
@@ -142,6 +152,10 @@ pub(crate) struct HtmlHighlightStyle {
     pub weight: FontWeight,
     pub link: bool,
     pub oblique: bool,
+    pub color: Option<gpui::Hsla>,
+    pub background_color: Option<gpui::Hsla>,
+    pub code: bool,
+    pub mark: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -335,6 +349,10 @@ fn parse_html_node(
                 if let Some(table) = extract_html_table(node, source_range) {
                     elements.push(ParsedHtmlElement::Table(table));
                 }
+            } else if name.local == local_name!("details") {
+                if let Some(details) = extract_html_details(node, source_range) {
+                    elements.push(ParsedHtmlElement::Details(details));
+                }
             } else {
                 consume_children(source_range, node, elements, context);
             }
@@ -417,13 +435,16 @@ fn parse_paragraph(
                     ..Default::default()
                 });
                 consume_paragraph(source_range, node, paragraph, highlights, links);
-            } else if name.local == local_name!("del") {
+            } else if name.local == local_name!("del")
+                || name.local == local_name!("s")
+                || name.local == local_name!("strike")
+            {
                 highlights.push(HtmlHighlightStyle {
                     strikethrough: true,
                     ..Default::default()
                 });
                 consume_paragraph(source_range, node, paragraph, highlights, links);
-            } else if name.local == local_name!("ins") {
+            } else if name.local == local_name!("ins") || name.local == local_name!("u") {
                 highlights.push(HtmlHighlightStyle {
                     underline: true,
                     ..Default::default()
@@ -436,6 +457,24 @@ fn parse_paragraph(
                         ..Default::default()
                     });
                     links.push(url.into());
+                }
+                consume_paragraph(source_range, node, paragraph, highlights, links);
+            } else if name.local == local_name!("code") || name.local == local_name!("kbd") {
+                highlights.push(HtmlHighlightStyle {
+                    code: true,
+                    ..Default::default()
+                });
+                consume_paragraph(source_range, node, paragraph, highlights, links);
+            } else if name.local == local_name!("mark") {
+                highlights.push(HtmlHighlightStyle {
+                    mark: true,
+                    ..Default::default()
+                });
+                consume_paragraph(source_range, node, paragraph, highlights, links);
+            } else if name.local == local_name!("span") {
+                let styles_map = extract_styles_from_attributes(attrs);
+                if let Some(style) = html_style_from_html_styles(styles_map) {
+                    highlights.push(style);
                 }
                 consume_paragraph(source_range, node, paragraph, highlights, links);
             } else {
@@ -552,6 +591,21 @@ fn attr_value(attrs: &RefCell<Vec<Attribute>>, name: LocalName) -> Option<String
     })
 }
 
+fn parse_html_color(value: &str) -> Option<gpui::Hsla> {
+    if let Ok(rgba) = gpui::Rgba::try_from(value) {
+        return Some(rgba.into());
+    }
+    match value.trim().to_lowercase().as_str() {
+        "black" => Some(gpui::black()),
+        "white" => Some(gpui::white()),
+        "red" => Some(gpui::red()),
+        "green" => Some(gpui::green()),
+        "blue" => Some(gpui::blue()),
+        "yellow" => Some(gpui::yellow()),
+        _ => None,
+    }
+}
+
 fn html_style_from_html_styles(styles: HashMap<String, String>) -> Option<HtmlHighlightStyle> {
     let mut html_style = HtmlHighlightStyle::default();
 
@@ -593,6 +647,17 @@ fn html_style_from_html_styles(styles: HashMap<String, String>) -> Option<HtmlHi
                 }
             }
         }
+    }
+
+    if let Some(color_value) = styles.get("color") {
+        html_style.color = parse_html_color(color_value);
+    }
+
+    if let Some(background_value) = styles
+        .get("background-color")
+        .or_else(|| styles.get("background"))
+    {
+        html_style.background_color = parse_html_color(background_value);
     }
 
     if html_style != HtmlHighlightStyle::default() {
@@ -755,6 +820,52 @@ fn extract_html_blockquote(
             source_range,
         })
     }
+}
+
+fn extract_html_details(node: &Node, source_range: Range<usize>) -> Option<ParsedHtmlDetails> {
+    let mut summary = None;
+    let mut children = Vec::new();
+
+    for child in node.children.borrow().iter() {
+        if let NodeData::Element { name, attrs, .. } = &child.data {
+            if name.local == local_name!("summary") {
+                let mut paragraph = HtmlParagraph::new();
+                let styles_map = extract_styles_from_attributes(attrs);
+                let mut styles = if let Some(style) = html_style_from_html_styles(styles_map) {
+                    vec![style]
+                } else {
+                    Vec::new()
+                };
+                consume_paragraph(
+                    source_range.clone(),
+                    child,
+                    &mut paragraph,
+                    &mut styles,
+                    &mut Vec::new(),
+                );
+                if !paragraph.is_empty() {
+                    summary = Some(ParsedHtmlParagraph {
+                        text_align: None,
+                        contents: paragraph,
+                    });
+                }
+                continue;
+            }
+        }
+
+        parse_html_node(
+            source_range.clone(),
+            child,
+            &mut children,
+            &ParseHtmlNodeContext::default(),
+        );
+    }
+
+    Some(ParsedHtmlDetails {
+        source_range,
+        summary,
+        children,
+    })
 }
 
 fn extract_html_table(node: &Node, source_range: Range<usize>) -> Option<ParsedHtmlTable> {

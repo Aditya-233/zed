@@ -238,6 +238,7 @@ pub(crate) fn parse_markdown_with_options(
     parse_html: bool,
     parse_heading_slugs: bool,
     parse_metadata_blocks: bool,
+    strict_commonmark: bool,
 ) -> ParsedMarkdownData {
     let mut state = ParseState::default();
     let mut language_names = HashSet::default();
@@ -251,7 +252,14 @@ pub(crate) fn parse_markdown_with_options(
     let mut within_table = false;
     let mut current_metadata_block_start = None;
     let mut metadata_block_content_range: Option<Range<usize>> = None;
-    let parse_options = if parse_metadata_blocks {
+    struct OpenList {
+        event_index: usize,
+        has_paragraph: bool,
+    }
+    let mut open_lists: Vec<OpenList> = Vec::new();
+    let parse_options = if strict_commonmark {
+        Options::empty()
+    } else if parse_metadata_blocks {
         PARSE_OPTIONS.union(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS)
     } else {
         PARSE_OPTIONS
@@ -378,7 +386,12 @@ pub(crate) fn parse_markdown_with_options(
 
                         MarkdownTag::CodeBlock { kind, metadata }
                     }
-                    pulldown_cmark::Tag::Paragraph => MarkdownTag::Paragraph,
+                    pulldown_cmark::Tag::Paragraph => {
+                        if let Some(open_list) = open_lists.last_mut() {
+                            open_list.has_paragraph = true;
+                        }
+                        MarkdownTag::Paragraph
+                    }
                     pulldown_cmark::Tag::Heading {
                         level,
                         id,
@@ -407,7 +420,10 @@ pub(crate) fn parse_markdown_with_options(
                         }
                     }
                     pulldown_cmark::Tag::BlockQuote(kind) => MarkdownTag::BlockQuote(kind),
-                    pulldown_cmark::Tag::List(start_number) => MarkdownTag::List(start_number),
+                    pulldown_cmark::Tag::List(start_number) => MarkdownTag::List {
+                        start_number,
+                        is_tight: true,
+                    },
                     pulldown_cmark::Tag::Item => MarkdownTag::Item,
                     pulldown_cmark::Tag::FootnoteDefinition(label) => {
                         MarkdownTag::FootnoteDefinition(SharedString::from(label.to_string()))
@@ -442,7 +458,15 @@ pub(crate) fn parse_markdown_with_options(
                         MarkdownTag::DefinitionListDefinition
                     }
                 };
-                state.push_event(range, MarkdownEvent::Start(tag))
+                let is_list = matches!(tag, MarkdownTag::List { .. });
+                state.push_event(range, MarkdownEvent::Start(tag));
+                if is_list {
+                    let event_index = state.events.len() - 1;
+                    open_lists.push(OpenList {
+                        event_index,
+                        has_paragraph: false,
+                    });
+                }
             }
             pulldown_cmark::Event::End(tag) => {
                 if let pulldown_cmark::TagEnd::Link = tag {
@@ -470,6 +494,20 @@ pub(crate) fn parse_markdown_with_options(
                     }
                 } else if let pulldown_cmark::TagEnd::Table = tag {
                     within_table = false;
+                } else if let pulldown_cmark::TagEnd::List(_) = tag {
+                    if let Some(open_list) = open_lists.pop() {
+                        let is_tight = !open_list.has_paragraph;
+                        if let Some((
+                            _,
+                            MarkdownEvent::Start(MarkdownTag::List {
+                                is_tight: ref mut tight,
+                                ..
+                            }),
+                        )) = state.events.get_mut(open_list.event_index)
+                        {
+                            *tight = is_tight;
+                        }
+                    }
                 }
                 state.push_event(range, MarkdownEvent::End(tag));
             }
@@ -550,7 +588,7 @@ pub(crate) fn parse_markdown_with_options(
 
                 let mut ranges = ranges.into_iter().peekable();
 
-                if !within_link && !within_code_block {
+                if !within_link && !within_code_block && !strict_commonmark {
                     let mut finder = LinkFinder::new();
                     finder.kinds(&[linkify::LinkKind::Url]);
 
@@ -644,7 +682,7 @@ pub(crate) fn parse_markdown_with_options(
                 let content_range =
                     content_range.start + range.start..content_range.end + range.start;
                 let source = &text[content_range.clone()];
-                let event = if within_table && source.contains(r"\|") {
+                let event = if source != parsed.as_ref() {
                     MarkdownEvent::SubstitutedCode(parsed.to_string())
                 } else {
                     MarkdownEvent::Code
@@ -840,7 +878,10 @@ pub enum MarkdownTag {
 
     /// A list. If the list is ordered the field indicates the number of the first item.
     /// Contains only list items.
-    List(Option<u64>), // TODO: add delim and tight for ast (not needed for html)
+    List {
+        start_number: Option<u64>,
+        is_tight: bool,
+    },
 
     /// A list item.
     Item,
@@ -1022,7 +1063,7 @@ mod tests {
     #[test]
     fn test_yaml_style_metadata_block() {
         assert_eq!(
-            parse_markdown_with_options("---\ntitle: Post\n---\n# Heading", false, false, true),
+            parse_markdown_with_options("---\ntitle: Post\n---\n# Heading", false, false, true, false),
             ParsedMarkdownData {
                 events: vec![
                     (0..19, RootStart),
@@ -1066,7 +1107,7 @@ mod tests {
     #[test]
     fn test_metadata_block_text_is_verbatim() {
         let parsed =
-            parse_markdown_with_options("---\nurl: https://zed.dev\n---\nBody", false, false, true);
+            parse_markdown_with_options("---\nurl: https://zed.dev\n---\nBody", false, false, true, false);
         assert!(
             parsed
                 .events
@@ -1082,6 +1123,7 @@ mod tests {
             false,
             false,
             true,
+            false,
         );
 
         assert_eq!(
@@ -1108,7 +1150,7 @@ mod tests {
     #[test]
     fn test_metadata_blocks_store_fallback_for_nested_yaml() {
         let parsed =
-            parse_markdown_with_options("---\ntags:\n  - zed\n---\nBody", false, false, true);
+            parse_markdown_with_options("---\ntags:\n  - zed\n---\nBody", false, false, true, false);
 
         assert_eq!(
             parsed.metadata_blocks,
@@ -1167,6 +1209,7 @@ mod tests {
                 "  <!--\nrdoc-file=string.c\n-->\nReturns",
                 false,
                 false,
+                false,
                 false
             ),
             ParsedMarkdownData {
@@ -1196,6 +1239,7 @@ mod tests {
         assert_eq!(
             parse_markdown_with_options(
                 "&nbsp;&nbsp; https://some.url some \\`&#9658;\\` text",
+                false,
                 false,
                 false,
                 false,
@@ -1240,6 +1284,7 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
             )
             .events,
             vec![
@@ -1272,6 +1317,7 @@ mod tests {
         assert_eq!(
             parse_markdown_with_options(
                 "-- --- ... \"double quoted\" 'single quoted' ----------",
+                false,
                 false,
                 false,
                 false,
@@ -1311,6 +1357,7 @@ mod tests {
                 "```rust\nfn main() {\n let a = 1;\n}\n```",
                 false,
                 false,
+                false,
                 false
             ),
             ParsedMarkdownData {
@@ -1341,7 +1388,7 @@ mod tests {
             }
         );
         assert_eq!(
-            parse_markdown_with_options("    fn main() {}", false, false, false),
+            parse_markdown_with_options("    fn main() {}", false, false, false, false),
             ParsedMarkdownData {
                 events: vec![
                     (4..16, RootStart),
@@ -1366,7 +1413,7 @@ mod tests {
         );
 
         for markdown in ["```mermaid\ngraph TD;\n~~~", "~~~~mermaid\ngraph TD;\n~~~"] {
-            let parsed = parse_markdown_with_options(markdown, false, false, false);
+            let parsed = parse_markdown_with_options(markdown, false, false, false, false);
             let metadata = parsed.events.iter().find_map(|(_, event)| match event {
                 Start(CodeBlock { metadata, .. }) => Some(metadata),
                 _ => None,
@@ -1379,7 +1426,7 @@ mod tests {
     }
 
     fn assert_code_block_does_not_emit_links(markdown: &str) {
-        let parsed = parse_markdown_with_options(markdown, false, false, false);
+        let parsed = parse_markdown_with_options(markdown, false, false, false, false);
         let mut code_block_depth = 0;
         let mut code_block_count = 0;
         let mut saw_text_inside_code_block = false;
@@ -1437,7 +1484,8 @@ mod tests {
                 "+++\ntitle = \"Example\"\n+++\n\nParagraph",
                 false,
                 false,
-                true
+                true,
+                false
             ),
             ParsedMarkdownData {
                 events: vec![
@@ -1477,6 +1525,7 @@ mod tests {
                 "+++\ntitle = \"Example\"\n+++\n\nParagraph",
                 false,
                 false,
+                false,
                 false
             ),
             ParsedMarkdownData {
@@ -1500,7 +1549,7 @@ mod tests {
 |------|---------|
 | [x]  | Fix bug |
 | [ ]  | Add feature |";
-        let parsed = parse_markdown_with_options(markdown, false, false, false);
+        let parsed = parse_markdown_with_options(markdown, false, false, false, false);
 
         let mut in_table = false;
         let mut saw_task_list_marker = false;
@@ -1559,7 +1608,7 @@ mod tests {
         let markdown = r"| Pattern |
 | --- |
 | `a\|b` |";
-        let parsed = parse_markdown_with_options(markdown, false, false, false);
+        let parsed = parse_markdown_with_options(markdown, false, false, false, false);
         let code_range = {
             let start = markdown.find(r"a\|b").expect("inline code source");
             start..start + r"a\|b".len()
@@ -1579,7 +1628,7 @@ mod tests {
     #[test]
     fn test_inline_code_keeps_escaped_pipes_outside_tables() {
         let markdown = r"`a\|b`";
-        let parsed = parse_markdown_with_options(markdown, false, false, false);
+        let parsed = parse_markdown_with_options(markdown, false, false, false, false);
 
         assert!(
             parsed
@@ -1626,6 +1675,7 @@ mod tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(
             parsed.events,
@@ -1657,6 +1707,7 @@ mod tests {
             false,
             false,
             false,
+            false,
         );
         assert_eq!(parsed.footnote_definitions.len(), 2);
         assert!(parsed.footnote_definitions.contains_key("a"));
@@ -1672,6 +1723,7 @@ mod tests {
         assert_eq!(
             parse_markdown_with_options(
                 "https:/\\/example.com is equivalent to https://example&#46;com!",
+                false,
                 false,
                 false,
                 false,
@@ -1718,6 +1770,7 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
             )
             .events,
             [
@@ -1752,6 +1805,7 @@ mod tests {
             false,
             true,
             false,
+            false,
         );
         assert_eq!(parsed.heading_slugs.len(), 5);
         assert!(parsed.heading_slugs.contains_key("hello-world"));
@@ -1768,6 +1822,7 @@ mod tests {
             false,
             true,
             false,
+            false,
         );
         let first = parsed.heading_slugs.get("duplicate").copied();
         let second = parsed.heading_slugs.get("duplicate-1").copied();
@@ -1778,7 +1833,7 @@ mod tests {
 
     #[test]
     fn test_heading_slug_collision_with_dedup_suffix() {
-        let parsed = parse_markdown_with_options("# Foo\n\n## Foo\n\n## Foo 1", false, true, false);
+        let parsed = parse_markdown_with_options("# Foo\n\n## Foo\n\n## Foo 1", false, true, false, false);
         assert_eq!(parsed.heading_slugs.len(), 3);
         assert!(parsed.heading_slugs.contains_key("foo"));
         assert!(parsed.heading_slugs.contains_key("foo-1"));
@@ -1790,7 +1845,7 @@ mod tests {
         use pulldown_cmark::BlockQuoteKind;
 
         let markdown = "\n> [!NOTE]\n> A note.\n\n> [!TIP]\n> A tip.\n\n> [!IMPORTANT]\n> Important.\n\n> [!WARNING]\n> A warning.\n\n> [!CAUTION]\n> A caution.\n\n> Plain quote.\n";
-        let parsed = parse_markdown_with_options(markdown, false, false, false);
+        let parsed = parse_markdown_with_options(markdown, false, false, false, false);
 
         let block_quote_kinds: Vec<_> = parsed
             .events
@@ -1825,7 +1880,7 @@ mod tests {
             "hello<br class=\"x\">world",
             "hello<br class=\"x\"/>world",
         ] {
-            let parsed = parse_markdown_with_options(input, true, false, false);
+            let parsed = parse_markdown_with_options(input, true, false, false, false);
             let has_hard_break = parsed
                 .events
                 .iter()
@@ -1844,7 +1899,7 @@ mod tests {
     #[test]
     fn test_br_tag_not_a_hard_break_without_parse_html() {
         for input in ["hello<br>world", "hello<br/>world", "hello<br />world"] {
-            let parsed = parse_markdown_with_options(input, false, false, false);
+            let parsed = parse_markdown_with_options(input, false, false, false, false);
             let has_hard_break = parsed
                 .events
                 .iter()
@@ -1867,7 +1922,7 @@ mod tests {
     #[test]
     fn test_br_prefixed_tag_is_not_a_hard_break() {
         for input in ["a<break>b", "a<brick>b", "a<b>bold</b>c"] {
-            let parsed = parse_markdown_with_options(input, true, false, false);
+            let parsed = parse_markdown_with_options(input, true, false, false, false);
             let has_hard_break = parsed
                 .events
                 .iter()
@@ -1882,7 +1937,7 @@ mod tests {
     #[test]
     fn test_unrecognized_inline_html_preserved_as_inline_html() {
         for input in ["a<span>b</span>c", "a<em>b</em>c", "a<strong>b</strong>c"] {
-            let parsed = parse_markdown_with_options(input, false, false, false);
+            let parsed = parse_markdown_with_options(input, false, false, false, false);
             let has_inline_html = parsed
                 .events
                 .iter()
@@ -1905,7 +1960,7 @@ mod tests {
     #[test]
     fn test_inline_math_parsing() {
         let input = "Hello $x^2 + y^2 = z^2$ world";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let math_events: Vec<_> = parsed
             .events
             .iter()
@@ -1921,7 +1976,7 @@ mod tests {
     #[test]
     fn test_display_math_parsing() {
         let input = "$$\\frac{a}{b}$$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let math_events: Vec<_> = parsed
             .events
             .iter()
@@ -1937,7 +1992,7 @@ mod tests {
     #[test]
     fn test_math_not_inside_code_blocks() {
         let input = "```\n$x^2$\n```";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let has_math = parsed
             .events
             .iter()
@@ -1951,7 +2006,7 @@ mod tests {
     #[test]
     fn test_multiple_math_expressions() {
         let input = "Let $a$ and $b$ be variables. Then $$a + b = c$$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let inline_count = parsed
             .events
             .iter()
@@ -1969,7 +2024,7 @@ mod tests {
     #[test]
     fn test_math_with_nested_braces() {
         let input = "$f(x) = { x^2 \\text{ if } x > 0 }$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let math_events: Vec<_> = parsed
             .events
             .iter()
@@ -1985,7 +2040,7 @@ mod tests {
     #[test]
     fn test_adjacent_math_expressions() {
         let input = "$a$$b$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let math_count = parsed
             .events
             .iter()
@@ -2000,7 +2055,7 @@ mod tests {
     #[test]
     fn test_math_preserves_surrounding_markdown() {
         let input = "**bold** and $x^2$ and *italic*";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let has_bold = parsed
             .events
             .iter()
@@ -2016,5 +2071,80 @@ mod tests {
         assert!(has_bold, "bold should still be parsed");
         assert!(has_italic, "italic should still be parsed");
         assert!(has_math, "math should be parsed");
+    }
+
+    #[test]
+    fn test_strict_commonmark_mode() {
+        let input = "Visit https://zed.dev and [Zed](https://zed.dev)";
+        let strict = parse_markdown_with_options(input, false, false, false, true);
+        let non_strict = parse_markdown_with_options(input, false, false, false, false);
+
+        let strict_links: Vec<_> = strict
+            .events
+            .iter()
+            .filter_map(|(_, event)| match event {
+                Start(Link { dest_url, .. }) => Some(dest_url.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            strict_links,
+            vec!["https://zed.dev"],
+            "strict mode must only parse explicit markdown links, not bare URLs"
+        );
+
+        let non_strict_links: Vec<_> = non_strict
+            .events
+            .iter()
+            .filter_map(|(_, event)| match event {
+                Start(Link { dest_url, .. }) => Some(dest_url.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            non_strict_links,
+            vec!["https://zed.dev", "https://zed.dev"],
+            "non-strict mode autolinks bare URLs"
+        );
+    }
+
+    #[test]
+    fn test_tight_vs_loose_lists() {
+        let tight_md = "* alpha\n* beta";
+        let tight_parsed = parse_markdown_with_options(tight_md, false, false, false, false);
+        let tight_list = tight_parsed.events.iter().find_map(|(_, event)| match event {
+            Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
+            _ => None,
+        });
+        assert_eq!(tight_list, Some(true), "tight list must have is_tight = true");
+
+        let loose_md = "* alpha\n\n* beta";
+        let loose_parsed = parse_markdown_with_options(loose_md, false, false, false, false);
+        let loose_list = loose_parsed.events.iter().find_map(|(_, event)| match event {
+            Start(MarkdownTag::List { is_tight, .. }) => Some(*is_tight),
+            _ => None,
+        });
+        assert_eq!(loose_list, Some(false), "loose list must have is_tight = false");
+    }
+
+    #[test]
+    fn test_code_span_normalization() {
+        let input = "` foo ` and `bar\nbaz` and `simple`";
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
+
+        let substituted_code_texts: Vec<_> = parsed
+            .events
+            .iter()
+            .filter_map(|(_, event)| match event {
+                MarkdownEvent::SubstitutedCode(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            substituted_code_texts,
+            vec!["foo", "bar baz"],
+            "code spans with stripped padding or newlines must produce SubstitutedCode"
+        );
     }
 }

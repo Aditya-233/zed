@@ -533,6 +533,7 @@ pub struct MarkdownOptions {
     pub render_math: bool,
     pub parse_heading_slugs: bool,
     pub render_metadata_blocks: bool,
+    pub strict_commonmark: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1300,6 +1301,7 @@ impl Markdown {
                 should_parse_html,
                 should_parse_heading_slugs,
                 should_parse_metadata_blocks,
+                self.options.strict_commonmark,
             );
             let events = parsed.events;
             let language_names = parsed.language_names;
@@ -1940,8 +1942,9 @@ impl MarkdownElement {
         text_align_override: Option<TextAlign>,
     ) {
         let align = text_align_override.unwrap_or(self.style.base_text_style.text_align);
+        let in_tight_list = builder.is_in_tight_list();
         let mut paragraph = div().when(!self.style.height_is_multiple_of_line_height, |el| {
-            el.mb(self.style.paragraph_spacing)
+            el.when(!in_tight_list, |el| el.mb(self.style.paragraph_spacing))
                 .line_height(self.style.paragraph_line_height)
         });
 
@@ -2173,10 +2176,12 @@ impl MarkdownElement {
         range: &Range<usize>,
         markdown_end: usize,
     ) {
+        let is_tight = builder.is_in_tight_list();
         builder.push_div(
             div()
                 .when(!self.style.height_is_multiple_of_line_height, |el| {
-                    el.mb_1()
+                    el.when(is_tight, |el| el.mb_0p5())
+                        .when(!is_tight, |el| el.mb_1())
                         .gap_1()
                         .line_height(self.style.paragraph_line_height)
                 })
@@ -2489,6 +2494,90 @@ impl MarkdownElement {
             }
         });
     }
+}
+
+fn parse_markdown_inline_color(value: &str) -> Option<Hsla> {
+    if let Ok(rgba) = gpui::Rgba::try_from(value) {
+        return Some(rgba.into());
+    }
+    match value.trim().to_lowercase().as_str() {
+        "black" => Some(gpui::black()),
+        "white" => Some(gpui::white()),
+        "red" => Some(gpui::red()),
+        "green" => Some(gpui::green()),
+        "blue" => Some(gpui::blue()),
+        "yellow" => Some(gpui::yellow()),
+        _ => None,
+    }
+}
+
+fn extract_html_attribute_value<'a>(tag: &'a str, attribute_name: &str) -> Option<&'a str> {
+    let lowercase_tag = tag.to_lowercase();
+    let search_prefix = format!("{attribute_name}=");
+    let attribute_position = lowercase_tag.find(&search_prefix)?;
+    let remaining = &tag[attribute_position + search_prefix.len()..];
+    let quote_delimiter = remaining.chars().next()?;
+    if quote_delimiter == '"' || quote_delimiter == '\'' {
+        let after_quote = &remaining[1..];
+        let end_quote = after_quote.find(quote_delimiter)?;
+        Some(&after_quote[..end_quote])
+    } else {
+        let end_delimiter = remaining
+            .find(|character: char| character.is_whitespace() || character == '>')
+            .unwrap_or(remaining.len());
+        Some(&remaining[..end_delimiter])
+    }
+}
+
+fn parse_span_text_style(tag: &str) -> TextStyleRefinement {
+    let mut refinement = TextStyleRefinement::default();
+    if let Some(style_attribute) = extract_html_attribute_value(tag, "style") {
+        for declaration in style_attribute.split(';') {
+            let mut parts = declaration.splitn(2, ':');
+            if let Some((property, value)) = parts.next().zip(parts.next()) {
+                let property = property.trim().to_lowercase();
+                let value = value.trim();
+                match property.as_str() {
+                    "color" => {
+                        refinement.color = parse_markdown_inline_color(value);
+                    }
+                    "background" | "background-color" => {
+                        refinement.background_color = parse_markdown_inline_color(value);
+                    }
+                    "font-weight" => {
+                        if value.eq_ignore_ascii_case("bold") {
+                            refinement.font_weight = Some(FontWeight::BOLD);
+                        } else if let Ok(weight) = value.parse::<f32>() {
+                            refinement.font_weight = Some(FontWeight(weight));
+                        }
+                    }
+                    "font-style" => {
+                        if value.eq_ignore_ascii_case("italic") {
+                            refinement.font_style = Some(FontStyle::Italic);
+                        } else if value.eq_ignore_ascii_case("oblique") {
+                            refinement.font_style = Some(FontStyle::Oblique);
+                        }
+                    }
+                    "text-decoration" => {
+                        if value.eq_ignore_ascii_case("underline") {
+                            refinement.underline = Some(UnderlineStyle {
+                                thickness: px(1.),
+                                color: None,
+                                ..Default::default()
+                            });
+                        } else if value.eq_ignore_ascii_case("line-through") {
+                            refinement.strikethrough = Some(StrikethroughStyle {
+                                thickness: px(1.),
+                                color: None,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    refinement
 }
 
 impl Styled for MarkdownElement {
@@ -2816,8 +2905,11 @@ impl Element for MarkdownElement {
                                 handled_html_block = true;
                             }
                         }
-                        MarkdownTag::List(bullet_index) => {
-                            builder.push_list(*bullet_index);
+                        MarkdownTag::List {
+                            start_number,
+                            is_tight,
+                        } => {
+                            builder.push_list(*start_number, *is_tight);
                             let is_top_level = builder.list_stack.len() == 1;
                             builder.push_div(
                                 div()
@@ -3198,6 +3290,9 @@ impl Element for MarkdownElement {
                 }
                 MarkdownEvent::InlineHtml => {
                     let html = &parsed_markdown.source[range.clone()];
+                    let trimmed_html = html.trim();
+                    let lowercase_html = trimmed_html.to_lowercase();
+
                     if let Some(code) = html
                         .strip_prefix("<code>")
                         .and_then(|html| html.strip_suffix("</code>"))
@@ -3211,14 +3306,150 @@ impl Element for MarkdownElement {
                         );
                         continue;
                     }
-                    if html.starts_with("<code>") {
+                    if lowercase_html.starts_with("<code>") {
                         builder.push_text_style(self.style.inline_code.clone());
                         continue;
                     }
-                    if html.trim_end().starts_with("</code>") {
+                    if lowercase_html.starts_with("</code>") {
                         builder.pop_text_style();
                         continue;
                     }
+
+                    if let Some(kbd) = html
+                        .strip_prefix("<kbd>")
+                        .and_then(|html| html.strip_suffix("</kbd>"))
+                    {
+                        let kbd_start = range.start + "<kbd>".len();
+                        self.push_markdown_code_span(
+                            &mut builder,
+                            kbd,
+                            kbd_start..kbd_start + kbd.len(),
+                            cx,
+                        );
+                        continue;
+                    }
+                    if lowercase_html.starts_with("<kbd>") {
+                        builder.push_text_style(self.style.inline_code.clone());
+                        continue;
+                    }
+                    if lowercase_html.starts_with("</kbd>") {
+                        builder.pop_text_style();
+                        continue;
+                    }
+
+                    if self.options.parse_html {
+                        if lowercase_html.starts_with("<mark>") {
+                            builder.push_text_style(TextStyleRefinement {
+                                background_color: Some(cx.theme().colors().search_match_background),
+                                ..Default::default()
+                            });
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</mark>") {
+                            builder.pop_text_style();
+                            continue;
+                        }
+                        if lowercase_html.starts_with("<b>") || lowercase_html.starts_with("<strong>") {
+                            builder.push_text_style(TextStyleRefinement {
+                                font_weight: Some(FontWeight::BOLD),
+                                color: Some(cx.theme().colors().text),
+                                ..Default::default()
+                            });
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</b>") || lowercase_html.starts_with("</strong>") {
+                            builder.pop_text_style();
+                            continue;
+                        }
+                        if lowercase_html.starts_with("<i>") || lowercase_html.starts_with("<em>") {
+                            builder.push_text_style(TextStyleRefinement {
+                                font_style: Some(FontStyle::Italic),
+                                ..Default::default()
+                            });
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</i>") || lowercase_html.starts_with("</em>") {
+                            builder.pop_text_style();
+                            continue;
+                        }
+                        if lowercase_html.starts_with("<u>") || lowercase_html.starts_with("<ins>") {
+                            builder.push_text_style(TextStyleRefinement {
+                                underline: Some(UnderlineStyle {
+                                    thickness: px(1.),
+                                    color: None,
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            });
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</u>") || lowercase_html.starts_with("</ins>") {
+                            builder.pop_text_style();
+                            continue;
+                        }
+                        if lowercase_html.starts_with("<s>")
+                            || lowercase_html.starts_with("<del>")
+                            || lowercase_html.starts_with("<strike>")
+                        {
+                            builder.push_text_style(TextStyleRefinement {
+                                strikethrough: Some(StrikethroughStyle {
+                                    thickness: px(1.),
+                                    color: None,
+                                }),
+                                ..Default::default()
+                            });
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</s>")
+                            || lowercase_html.starts_with("</del>")
+                            || lowercase_html.starts_with("</strike>")
+                        {
+                            builder.pop_text_style();
+                            continue;
+                        }
+                        if lowercase_html.starts_with("<span") && lowercase_html.ends_with('>') {
+                            let refinement = parse_span_text_style(trimmed_html);
+                            builder.push_text_style(refinement);
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</span>") {
+                            builder.pop_text_style();
+                            continue;
+                        }
+                        if lowercase_html.starts_with("<details") && lowercase_html.ends_with('>') {
+                            builder.push_div(
+                                div()
+                                    .border_1()
+                                    .border_color(cx.theme().colors().border_variant)
+                                    .rounded_md()
+                                    .my(self.style.paragraph_spacing)
+                                    .p_2(),
+                                range,
+                                markdown_end,
+                            );
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</details>") {
+                            builder.pop_div();
+                            continue;
+                        }
+                        if lowercase_html.starts_with("<summary") && lowercase_html.ends_with('>') {
+                            builder.push_div(
+                                div()
+                                    .font_weight(FontWeight::BOLD)
+                                    .cursor_pointer()
+                                    .child("▶ "),
+                                range,
+                                markdown_end,
+                            );
+                            continue;
+                        }
+                        if lowercase_html.starts_with("</summary>") {
+                            builder.pop_div();
+                            continue;
+                        }
+                    }
+
                     builder.push_text(&parsed_markdown.source[range.clone()], range.clone());
                 }
                 MarkdownEvent::Rule => {
@@ -3768,6 +3999,7 @@ struct PendingLine {
 
 struct ListStackEntry {
     bullet_index: Option<u64>,
+    is_tight: bool,
 }
 
 impl MarkdownElementBuilder {
@@ -4016,8 +4248,15 @@ impl MarkdownElementBuilder {
         );
     }
 
-    fn push_list(&mut self, bullet_index: Option<u64>) {
-        self.list_stack.push(ListStackEntry { bullet_index });
+    fn push_list(&mut self, bullet_index: Option<u64>, is_tight: bool) {
+        self.list_stack.push(ListStackEntry {
+            bullet_index,
+            is_tight,
+        });
+    }
+
+    fn is_in_tight_list(&self) -> bool {
+        self.list_stack.last().map_or(false, |entry| entry.is_tight)
     }
 
     fn next_bullet_index(&mut self) -> Option<u64> {
@@ -5999,7 +6238,7 @@ mod tests {
         // all task list marker strings as well as whether they are checked or
         // not.
         let task_marker_states = |markdown: &str| -> Vec<(String, bool)> {
-            let events = parse_markdown_with_options(markdown, false, false, false).events;
+            let events = parse_markdown_with_options(markdown, false, false, false, false).events;
 
             events
                 .iter()
@@ -6035,7 +6274,7 @@ mod tests {
     #[test]
     fn test_table_checkbox_detection() {
         let md = "| Done |\n|------|\n| [x] |\n| [ ] |";
-        let events = parse_markdown_with_options(md, false, false, false).events;
+        let events = parse_markdown_with_options(md, false, false, false, false).events;
 
         let mut in_table = false;
         let mut cell_texts: Vec<String> = Vec::new();
@@ -6077,7 +6316,7 @@ mod tests {
     #[test]
     fn test_table_checkbox_marker_source_range() {
         let md = "| Done |\n|------|\n|  [x]  |\n| [ ] |";
-        let events = parse_markdown_with_options(md, false, false, false).events;
+        let events = parse_markdown_with_options(md, false, false, false, false).events;
 
         let mut in_cell = false;
         let mut pending_text = String::new();
@@ -6382,7 +6621,7 @@ mod tests {
     }
 
     fn has_code_block(markdown: &str) -> bool {
-        let parsed_data = parse_markdown_with_options(markdown, false, false, false);
+        let parsed_data = parse_markdown_with_options(markdown, false, false, false, false);
         parsed_data
             .events
             .iter()
@@ -7304,5 +7543,84 @@ mod tests {
             )
         };
         (prose.layout.line_height(), code.layout.line_height())
+    }
+
+    #[gpui::test]
+    fn test_tight_and_loose_list_rendering(cx: &mut TestAppContext) {
+        let tight_md = "* item 1\n* item 2";
+        let tight_rendered = render_markdown(tight_md, cx);
+        let tight_text: String = tight_rendered
+            .lines
+            .iter()
+            .map(|line| line.layout.wrapped_text())
+            .collect();
+        assert!(tight_text.contains("item 1"), "tight list should render item 1");
+        assert!(tight_text.contains("item 2"), "tight list should render item 2");
+
+        let loose_md = "* item 1\n\n* item 2";
+        let loose_rendered = render_markdown(loose_md, cx);
+        let loose_text: String = loose_rendered
+            .lines
+            .iter()
+            .map(|line| line.layout.wrapped_text())
+            .collect();
+        assert!(loose_text.contains("item 1"), "loose list should render item 1");
+        assert!(loose_text.contains("item 2"), "loose list should render item 2");
+    }
+
+    #[gpui::test]
+    fn test_normalized_code_spans(cx: &mut TestAppContext) {
+        let rendered = render_markdown("Inline ` foo ` and `foo\nbar` code", cx);
+        let text: String = rendered
+            .lines
+            .iter()
+            .map(|line| line.layout.wrapped_text())
+            .collect();
+        assert!(
+            text.contains("Inline foo and foo bar code"),
+            "code spans should have space stripping and internal newlines converted to spaces; got: {text:?}"
+        );
+    }
+
+    #[gpui::test]
+    fn test_inline_html_expanded_tags(cx: &mut TestAppContext) {
+        let options = MarkdownOptions {
+            parse_html: true,
+            ..Default::default()
+        };
+        let md = "<kbd>Ctrl</kbd> + <mark>highlight</mark> and <span style=\"font-weight: bold;\">bold span</span>";
+        let rendered = render_markdown_with_options(md, None, options, cx);
+        let text: String = rendered
+            .lines
+            .iter()
+            .map(|line| line.layout.wrapped_text())
+            .collect();
+        assert!(
+            text.contains("Ctrl + highlight and bold span"),
+            "expanded inline HTML tags should render inner text cleanly; got: {text:?}"
+        );
+    }
+
+    #[gpui::test]
+    fn test_details_summary_block_html(cx: &mut TestAppContext) {
+        let options = MarkdownOptions {
+            parse_html: true,
+            ..Default::default()
+        };
+        let md = "<details>\n<summary>Click to view</summary>\n<p>Hidden body</p>\n</details>";
+        let rendered = render_markdown_with_options(md, None, options, cx);
+        let text: String = rendered
+            .lines
+            .iter()
+            .map(|line| line.layout.wrapped_text())
+            .collect();
+        assert!(
+            text.contains("Click to view"),
+            "details element should render summary; got: {text:?}"
+        );
+        assert!(
+            text.contains("Hidden body"),
+            "details element should render body; got: {text:?}"
+        );
     }
 }

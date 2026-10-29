@@ -8,8 +8,8 @@ use ui::prelude::*;
 
 use crate::html::html_parser::{
     HtmlHighlightStyle, HtmlImage, HtmlParagraph, HtmlParagraphChunk, ParsedHtmlBlock,
-    ParsedHtmlElement, ParsedHtmlList, ParsedHtmlListItemType, ParsedHtmlTable, ParsedHtmlTableRow,
-    ParsedHtmlText,
+    ParsedHtmlDetails, ParsedHtmlElement, ParsedHtmlList, ParsedHtmlListItemType, ParsedHtmlTable,
+    ParsedHtmlTableRow, ParsedHtmlText,
 };
 use crate::{MarkdownElement, MarkdownElementBuilder};
 
@@ -138,7 +138,50 @@ impl MarkdownElement {
             ParsedHtmlElement::Image(image) => {
                 self.render_html_image(image, builder, cx);
             }
+            ParsedHtmlElement::Details(details) => {
+                self.render_html_details(details, source_allocator, builder, markdown_end, cx);
+            }
         }
+    }
+
+    fn render_html_details(
+        &self,
+        details: &ParsedHtmlDetails,
+        source_allocator: &mut HtmlSourceAllocator,
+        builder: &mut MarkdownElementBuilder,
+        markdown_end: usize,
+        cx: &mut App,
+    ) {
+        builder.push_div(
+            div()
+                .border_1()
+                .border_color(cx.theme().colors().border_variant)
+                .rounded_md()
+                .my(self.style.paragraph_spacing)
+                .p_2(),
+            &details.source_range,
+            markdown_end,
+        );
+        if let Some(summary) = &details.summary {
+            builder.push_div(
+                div()
+                    .font_weight(FontWeight::BOLD)
+                    .mb_1()
+                    .child("▶ "),
+                &details.source_range,
+                markdown_end,
+            );
+            self.render_html_paragraph(
+                &summary.contents,
+                source_allocator,
+                builder,
+                cx,
+                markdown_end,
+            );
+            builder.pop_div();
+        }
+        self.render_html_elements(&details.children, source_allocator, builder, markdown_end, cx);
+        builder.pop_div();
     }
 
     fn render_html_list(
@@ -406,9 +449,17 @@ impl MarkdownElement {
             let mut refinement = TextStyleRefinement::default();
             let mut has_refinement = false;
 
+            let mark_background = Some(cx.theme().colors().search_match_background);
+            let code_background = Some(cx.theme().colors().editor_foreground.opacity(0.08));
+
             for (highlight_range, style) in &text.highlights {
                 if highlight_range.start < end && highlight_range.end > start {
-                    apply_html_highlight_style(&mut refinement, style);
+                    apply_html_highlight_style(
+                        &mut refinement,
+                        style,
+                        mark_background,
+                        code_background,
+                    );
                     has_refinement = true;
                 }
             }
@@ -469,7 +520,12 @@ impl MarkdownElement {
     }
 }
 
-fn apply_html_highlight_style(refinement: &mut TextStyleRefinement, style: &HtmlHighlightStyle) {
+fn apply_html_highlight_style(
+    refinement: &mut TextStyleRefinement,
+    style: &HtmlHighlightStyle,
+    mark_background: Option<gpui::Hsla>,
+    code_background: Option<gpui::Hsla>,
+) {
     if style.weight != FontWeight::default() {
         refinement.font_weight = Some(style.weight);
     }
@@ -493,6 +549,22 @@ fn apply_html_highlight_style(refinement: &mut TextStyleRefinement, style: &Html
             thickness: px(1.),
             color: None,
         });
+    }
+
+    if let Some(color) = style.color {
+        refinement.color = Some(color);
+    }
+
+    if let Some(background) = style.background_color {
+        refinement.background_color = Some(background);
+    } else if style.mark {
+        if let Some(mark_bg) = mark_background {
+            refinement.background_color = Some(mark_bg);
+        }
+    } else if style.code {
+        if let Some(code_bg) = code_background {
+            refinement.background_color = Some(code_bg);
+        }
     }
 }
 

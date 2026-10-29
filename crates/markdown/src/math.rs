@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn test_extract_inline_math() {
         let input = "Hello $x^2$ world";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert_eq!(expressions.len(), 1);
         let expr = expressions.values().next().unwrap();
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn test_extract_display_math() {
         let input = "$$\\frac{a}{b}$$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert_eq!(expressions.len(), 1);
         let expr = expressions.values().next().unwrap();
@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn test_extract_multiple_expressions() {
         let input = "Let $a$ and $b$ be variables. Then $$a + b = c$$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert_eq!(expressions.len(), 3);
     }
@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn test_no_math_in_code_blocks() {
         let input = "```\n$x^2$\n```";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert!(expressions.is_empty());
     }
@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn test_no_math_in_inline_code() {
         let input = "Use `$x^2$` to represent a parabola";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert!(expressions.is_empty());
     }
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn test_math_with_complex_latex() {
         let input = "$\\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert_eq!(expressions.len(), 1);
         let expr = expressions.values().next().unwrap();
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn test_math_source_range_includes_delimiters() {
         let input = "Hello $x^2$ world";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         let expr = expressions.values().next().unwrap();
         // Source range should include the $ delimiters
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn test_math_in_paragraph_with_text() {
         let input = "The equation $E = mc^2$ is famous.";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let events: Vec<_> = parsed.events.iter().map(|(_, e)| e.clone()).collect();
         // Should have: RootStart, Paragraph, Text, InlineMath, Text, Paragraph, RootEnd
         let has_inline_math = events
@@ -473,7 +473,7 @@ mod tests {
     #[test]
     fn test_display_math_standalone() {
         let input = "$$\n\\sum_{i=1}^n i = \\frac{n(n+1)}{2}\n$$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert_eq!(expressions.len(), 1);
         let expr = expressions.values().next().unwrap();
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn test_display_math_multiline_trimmed() {
         let input = "$$\n\\int_0^\\infty e^{-x^2}dx=\\frac{\\sqrt\\pi}{2}\n$$";
-        let parsed = parse_markdown_with_options(input, false, false, false);
+        let parsed = parse_markdown_with_options(input, false, false, false, false);
         let expressions = extract_math_expressions(&parsed.events);
         assert_eq!(expressions.len(), 1);
         let expr = expressions.values().next().unwrap();
