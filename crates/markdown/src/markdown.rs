@@ -3135,7 +3135,6 @@ impl Element for MarkdownElement {
                         }),
                         MarkdownTag::Strong => builder.push_text_style(TextStyleRefinement {
                             font_weight: Some(FontWeight::BOLD),
-                            color: Some(cx.theme().colors().text),
                             ..Default::default()
                         }),
                         MarkdownTag::Strikethrough => {
