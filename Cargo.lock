@@ -8978,8 +8978,11 @@ dependencies = [
  "project",
  "rope",
  "settings",
+ "theme",
+ "theme_settings",
  "ui",
  "util",
+ "workspace",
 ]
 
 [[package]]
@@ -9431,6 +9434,29 @@ dependencies = [
  "zeroize",
  "zlog",
  "ztracing",
+]
+
+[[package]]
+name = "project_bookmarks"
+version = "0.1.0"
+dependencies = [
+ "editor",
+ "futures",
+ "fuzzy_nucleo",
+ "gpui",
+ "language",
+ "menu",
+ "picker",
+ "picker_preview",
+ "project",
+ "serde_json",
+ "text",
+ "theme",
+ "theme_settings",
+ "ui",
+ "util",
+ "workspace",
+ "zlog",
 ]
 
 [[package]]
@@ -16305,6 +16331,7 @@ dependencies = [
  "pretty_assertions",
  "profiling",
  "project",
+ "project_bookmarks",
  "project_panel",
  "project_symbols",
  "proto",
