@@ -10733,6 +10733,31 @@ pub fn workspace_windows_for_location(
         .collect()
 }
 
+fn preferred_workspace_target(
+    location: &SerializedWorkspaceLocation,
+    cx: &App,
+) -> Option<(WindowHandle<MultiWorkspace>, Entity<Workspace>)> {
+    let target_for_window = |window: WindowHandle<MultiWorkspace>| {
+        let multi_workspace = window.read(cx).ok()?;
+        let active_workspace = multi_workspace.workspace().clone();
+        Some((window, active_workspace))
+    };
+
+    let active_window = cx
+        .active_window()
+        .and_then(|window| window.downcast::<MultiWorkspace>());
+
+    let windows = workspace_windows_for_location(location, cx);
+    if let Some(window) = active_window
+        && windows.contains(&window)
+        && let Some(target) = target_for_window(window)
+    {
+        Some(target)
+    } else {
+        windows.into_iter().find_map(target_for_window)
+    }
+}
+
 pub async fn find_existing_workspace(
     abs_paths: &[PathBuf],
     open_options: &OpenOptions,
@@ -10748,11 +10773,18 @@ pub async fn find_existing_workspace(
 
     if open_options.workspace_matching != WorkspaceMatching::None {
         cx.update(|cx| {
+            let active_window = cx.active_window();
             for window in workspace_windows_for_location(location, cx) {
                 if let Ok(multi_workspace) = window.read(cx) {
-                    for workspace in multi_workspace.workspaces() {
-                        let project = workspace.read(cx).project.read(cx);
-                        let m = match open_options.workspace_matching {
+                    let active_workspace = multi_workspace.workspace();
+                    for workspace in std::iter::once(active_workspace).chain(
+                        multi_workspace
+                            .workspaces()
+                            .filter(|workspace| *workspace != active_workspace),
+                    ) {
+                        let workspace_ref = workspace.read(cx);
+                        let project = workspace_ref.project.read(cx);
+                        let visibility = match open_options.workspace_matching {
                             WorkspaceMatching::None => None,
                             WorkspaceMatching::MatchExact => {
                                 project.visibility_for_paths(abs_paths, true, cx)
@@ -10764,30 +10796,35 @@ pub async fn find_existing_workspace(
                                 project.visibility_for_paths(abs_paths, false, cx)
                             }
                         };
-                        if m > best_match {
+
+                        let match_priority = visibility
+                            .map(|visible| (visible, Some(window.into()) == active_window));
+                        if match_priority > best_match {
                             existing = Some((window, workspace.clone()));
-                            best_match = m;
-                        } else if best_match.is_none()
-                            && open_options.workspace_matching
-                                == WorkspaceMatching::MatchSubdirectory
-                        {
-                            existing = Some((window, workspace.clone()))
+                            open_visible = OpenVisible::All;
+                            best_match = match_priority;
                         }
                     }
                 }
             }
-        });
 
-        let all_paths_are_files = existing
-            .as_ref()
-            .and_then(|(_, target_workspace)| {
-                cx.update(|cx| {
-                    let workspace = target_workspace.read(cx);
-                    let project = workspace.project.read(cx);
-                    let path_style = workspace.path_style(cx);
-                    Some(!abs_paths.iter().any(|path| {
-                        let path = util::paths::SanitizedPath::new(path);
-                        project.worktrees(cx).any(|worktree| {
+            if existing.is_none()
+                && open_options.workspace_matching == WorkspaceMatching::MatchSubdirectory
+            {
+                existing = preferred_workspace_target(location, cx);
+                open_visible = OpenVisible::All;
+            }
+
+            let all_paths_are_files = existing.as_ref().is_some_and(|(_, workspace)| {
+                let workspace = workspace.read(cx);
+                let project = workspace.project.read(cx);
+                let path_style = workspace.path_style(cx);
+
+                !abs_paths.iter().any(|path| {
+                    let path = util::paths::SanitizedPath::new(path);
+                    project
+                        .worktrees(cx)
+                        .filter_map(|worktree| {
                             let worktree = worktree.read(cx);
                             let abs_path = worktree.abs_path();
                             path_style
@@ -10795,28 +10832,15 @@ pub async fn find_existing_workspace(
                                 .and_then(|rel| worktree.entry_for_path(&rel))
                                 .is_some_and(|e| e.is_dir())
                         })
-                    }))
+                        .any(|is_dir| is_dir)
                 })
-            })
-            .unwrap_or(false);
-
-        if open_options.wait && existing.is_some() && all_paths_are_files {
-            cx.update(|cx| {
-                let windows = workspace_windows_for_location(location, cx);
-                let window = cx
-                    .active_window()
-                    .and_then(|window| window.downcast::<MultiWorkspace>())
-                    .filter(|window| windows.contains(window))
-                    .or_else(|| windows.into_iter().next());
-                if let Some(window) = window {
-                    if let Ok(multi_workspace) = window.read(cx) {
-                        let active_workspace = multi_workspace.workspace().clone();
-                        existing = Some((window, active_workspace));
-                        open_visible = OpenVisible::None;
-                    }
-                }
             });
-        }
+
+            if open_options.wait && existing.is_some() && all_paths_are_files {
+                existing = preferred_workspace_target(location, cx).or(existing);
+                open_visible = OpenVisible::None;
+            }
+        });
     }
     (existing, open_visible)
 }
@@ -10834,10 +10858,8 @@ pub enum WorkspaceMatching {
     /// worktree roots themselves.
     MatchSubpaths,
     /// Match paths against existing worktrees including subdirectories, and
-    /// fall back to any existing window if no worktree matched.
-    ///
-    /// For example, `zed -a foo/bar` will activate the `bar` workspace if it
-    /// exists, otherwise it will open a new window with `foo/bar` as the root.
+    /// fall back to a workspace on the requested host if none match, preferring
+    /// the focused window and its active workspace.
     MatchSubdirectory,
 }
 
@@ -11034,19 +11056,11 @@ pub fn open_paths(
 
             if all_metadatas.into_iter().all(|file| !file.is_dir) {
                 cx.update(|cx| {
-                    let windows =
-                        workspace_windows_for_location(&SerializedWorkspaceLocation::Local, cx);
-                    let window = cx
-                        .active_window()
-                        .and_then(|window| window.downcast::<MultiWorkspace>())
-                        .filter(|window| windows.contains(window))
-                        .or_else(|| windows.into_iter().next());
-                    if let Some(window) = window {
-                        if let Ok(multi_workspace) = window.read(cx) {
-                            let active_workspace = multi_workspace.workspace().clone();
-                            existing = Some((window, active_workspace));
-                            open_visible = OpenVisible::None;
-                        }
+                    if let Some(target) =
+                        preferred_workspace_target(&SerializedWorkspaceLocation::Local, cx)
+                    {
+                        existing = Some(target);
+                        open_visible = OpenVisible::None;
                     }
                 });
             }
