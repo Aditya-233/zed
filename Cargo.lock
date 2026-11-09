@@ -8073,6 +8073,7 @@ dependencies = [
  "futures",
  "fuzzy",
  "gpui",
+ "menu",
  "picker",
  "project",
  "serde",

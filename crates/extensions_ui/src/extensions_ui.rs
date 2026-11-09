@@ -34,7 +34,7 @@ use ui::{
 };
 use util::ResultExt;
 use workspace::{
-    Workspace,
+    OpenPathPromptMode, Workspace,
     item::{Item, ItemEvent},
     workspace_error::{ErrorAction, ErrorSeverity, WorkspaceError},
 };
@@ -179,6 +179,7 @@ pub fn init(cx: &mut App) {
                         workspace.project().clone(),
                         workspace.app_state().fs.clone(),
                     ),
+                    OpenPathPromptMode::SelectPath,
                     window,
                     cx,
                 );
@@ -187,7 +188,7 @@ pub fn init(cx: &mut App) {
                 window
                     .spawn(cx, async move |cx| {
                         let extension_path = match prompt.await.map_err(anyhow::Error::from) {
-                            Ok(Some(mut paths)) => paths.pop()?,
+                            Ok(Some(mut result)) => result.paths.pop()?,
                             Ok(None) => return None,
                             Err(err) => {
                                 workspace_handle
