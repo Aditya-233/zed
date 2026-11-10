@@ -1527,6 +1527,8 @@ impl Dispatch<WlCallback, ObjectId> for WaylandClientStatePtr {
         };
         drop(state);
 
+        // The callback's timestamp uses a clock the protocol leaves unspecified,
+        // so frame timing measures from receipt, as the other platforms do.
         if let wl_callback::Event::Done { .. } = event {
             window.frame_callback_fired();
         }
@@ -2980,6 +2982,7 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
 
     #[derive(Clone)]
     struct FakeDataOffer {
