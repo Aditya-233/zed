@@ -10892,8 +10892,8 @@ fn preferred_workspace_target(
     }
 }
 
-pub async fn find_existing_workspace(
-    abs_paths: &[PathBuf],
+pub fn find_existing_workspace(
+    abs_paths: &[impl AsRef<Path>],
     open_options: &OpenOptions,
     location: &SerializedWorkspaceLocation,
     cx: &mut AsyncApp,
