@@ -91,9 +91,17 @@ tracing.workspace = true
 gpui_util.workspace = true
 hdrhistogram = { workspace = true, optional = true }
 waker-fn = "1.2.0"
-lyon = "1.0"
+lyon_path = "1.0.19"
 pin-project = "1.1.10"
-spin = "0.10.0"
+spin.workspace = true
+tiny-skia-path = "0.11"
+url.workspace = true
+uuid.workspace = true
+web-time.workspace = true
+heapless.workspace = true
+ztracing.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 pollster.workspace = true
 url.workspace = true
 uuid.workspace = true
@@ -122,8 +130,8 @@ backtrace.workspace = true
 collections = { workspace = true, features = ["test-support"] }
 env_logger.workspace = true
 gpui_platform = { workspace = true, features = ["font-kit", "wayland"] }
-gpui_util = { workspace = true }
-lyon = { version = "1.0", features = ["extra"] }
+gpui_util.workspace = true
+lyon_extra = "1.1.0"
 rand.workspace = true
 scheduler = { workspace = true, features = ["test-support"] }
 unicode-segmentation = { workspace = true }
