@@ -15,7 +15,6 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, unbounded},
 };
 
-use alacritty_terminal::grid::Dimensions as _;
 use itertools::Itertools as _;
 use mappings::mouse::{
     alt_scroll, grid_point, grid_point_and_side, mouse_button_report, mouse_moved_report,
@@ -63,10 +62,11 @@ use gpui::{
 use crate::alacritty::current_child_signal_mask;
 use crate::alacritty::{
     AlacrittyCell, AlacrittyGridIterator, AlacrittyHyperlink, AlacrittySearch, AlacrittyTerm,
-    AlacrittyTermConfig, AlacrittyTermLock, HyperlinkMatch, PtySender, RegexSearches,
-    append_text_to_term, apply_config, clear_saved_screen, content_text, display_offset,
-    display_only_term_config, find_from_terminal_point, full_content_range, last_non_empty_lines,
-    make_content, new_term, open_pty, pty_options, pty_term_config, resize, screen_lines,
+    AlacrittyTermConfig, AlacrittyTermLock, HyperlinkMatch, OutputParser, PtySender, RegexSearches,
+    append_text_to_term, apply_config, clear_saved_screen, content_text, cursor_blinking,
+    cursor_line, display_offset, display_only_term_config, find_from_terminal_point,
+    full_content_range, history_size, last_non_empty_lines, make_content, new_term, open_pty,
+    palette_color, pty_options, pty_term_config, renderable_cells, resize, screen_lines,
     scroll_display, scroll_to_point, search_matches, selection_text, set_default_cursor_style,
     set_selection as set_term_selection, shrink_to_used, spawn_event_loop,
     toggle_vi_mode as toggle_term_vi_mode, total_lines, update_selection as update_term_selection,
@@ -1019,7 +1019,7 @@ impl TerminalBuilder {
             completion_tx: None,
             term,
             term_config: config,
-            output_processor: Processor::<StdSyncHandler>::new(),
+            output_processor: None,
             title_override: None,
             events: VecDeque::with_capacity(10),
             last_content: Content {
@@ -1306,7 +1306,7 @@ impl TerminalBuilder {
                 completion_tx,
                 term,
                 term_config: config,
-                output_processor: Processor::<StdSyncHandler>::new(),
+                output_processor: None,
                 title_override: terminal_title_override,
                 events: VecDeque::with_capacity(10), //Should never get this high.
                 last_content: Default::default(),
@@ -1506,7 +1506,7 @@ pub struct Terminal {
     completion_tx: Option<Sender<Option<ExitStatus>>>,
     term: Arc<AlacrittyTermLock>,
     term_config: AlacrittyTermConfig,
-    output_processor: Processor<StdSyncHandler>,
+    output_processor: Option<OutputParser>,
     events: VecDeque<InternalEvent>,
     /// This is only used for mouse mode cell change detection
     last_mouse: Option<(Point, SelectionSide)>,
@@ -1660,8 +1660,7 @@ impl Terminal {
                 self.write_to_pty(format(self.last_content.terminal_bounds).into_bytes())
             }
             TerminalBackendEvent::CursorBlinkingChange => {
-                let terminal = self.term.lock();
-                let blinking = terminal.cursor_style().blinking;
+                let blinking = cursor_blinking(&self.term.lock());
                 cx.emit(Event::BlinkChanged(blinking));
             }
             TerminalBackendEvent::Bell => {
@@ -1689,7 +1688,7 @@ impl Terminal {
                 // we might respond with out of date value if a "set color" sequence is immediately
                 // followed by a color request sequence.
 
-                let color = self.term.lock().colors()[index]
+                let color = palette_color(&self.term.lock(), index)
                     .unwrap_or_else(|| to_vte_rgb(get_color_at_index(index, cx.theme().as_ref())));
                 self.write_to_pty(format(color).into_bytes());
             }
@@ -1842,7 +1841,7 @@ impl Terminal {
                     self.path_style,
                 ) {
                     Some(hyperlink) => {
-                        let history_size = term.history_size();
+                        let history_size = history_size(term);
                         self.process_hyperlink(hyperlink, *open, history_size, cx);
                     }
                     None => {
@@ -1853,7 +1852,7 @@ impl Terminal {
             InternalEvent::ProcessHyperlink(hyperlink, open) => {
                 // history_size must be read here since process_hyperlink cannot lock term
                 // (sync() already holds the lock when dispatching events)
-                let history_size = term.history_size();
+                let history_size = history_size(term);
                 self.process_hyperlink(hyperlink.clone(), *open, history_size, cx);
             }
         }
@@ -1958,18 +1957,24 @@ impl Terminal {
         apply_config(&self.term, &self.term_config);
     }
 
+    /// Normalizes line endings so text captured outside a PTY starts each line at column zero.
     pub fn write_output(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        // Inject bytes directly into the terminal emulator and refresh the UI.
-        // This bypasses the PTY/event loop for display-only terminals.
         let mut previous_byte_was_cr = false;
         let converted = convert_lf_to_crlf(bytes, &mut previous_byte_was_cr);
+        self.write_raw_output(&converted, cx);
+    }
 
+    /// Terminal byte streams already contain their control sequences and must not be normalized.
+    fn write_raw_output(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         let mut term = self.term.lock();
-        self.output_processor.advance(&mut *term, &converted);
+        self.output_processor
+            .get_or_insert_with(OutputParser::new)
+            .advance(&mut term, bytes);
         drop(term);
         self.detect_init_command_startup_marker();
         cx.emit(Event::Wakeup);
     }
+
 
     pub fn total_lines(&self) -> usize {
         total_lines(&self.term.lock_unfair())
@@ -2238,8 +2243,8 @@ impl Terminal {
         if !self.is_remote_terminal && input.contains(&b'\r') {
             let term = self.term.lock_unfair();
             self.pending_cwd_boundary = Some(Self::scrollback_position(
-                term.grid().cursor.point.line.0,
-                term.history_size(),
+                cursor_line(&term),
+                history_size(&term),
             ));
         }
 
@@ -2431,8 +2436,7 @@ impl Terminal {
 
     pub fn with_renderable_cells<R>(&self, f: impl for<'a> FnOnce(RenderableCells<'a>) -> R) -> R {
         let term = self.term.lock_unfair();
-        let content = term.renderable_content();
-        f(RenderableCells::new(content.display_iter))
+        f(renderable_cells(&term))
     }
 
     pub fn get_content(&self) -> String {
@@ -2922,7 +2926,7 @@ impl Terminal {
 
         let scrollback_position = self.pending_cwd_boundary.take().unwrap_or_else(|| {
             let term = self.term.lock_unfair();
-            Self::scrollback_position(term.grid().cursor.point.line.0, term.history_size())
+            Self::scrollback_position(cursor_line(&term), history_size(&term))
         });
         self.cwd_history.push(CwdHistoryEntry {
             scrollback_position,
@@ -3051,7 +3055,9 @@ impl Terminal {
         )
     }
 
-    /// Releases live PTY resources while retaining process metadata and buffered output.
+    /// Releases live PTY resources, including the parse buffer used by
+    /// [`Terminal::write_output`], while retaining process metadata and buffered
+    /// output.
     ///
     /// Calling this method after the resources have already been released is a no-op.
     pub fn release_pty_resources(&mut self) {
@@ -3063,6 +3069,10 @@ impl Terminal {
             return;
         };
         let info = info.clone();
+
+        // The terminal is retained past the command, so drop the parse buffer's
+        // reservation; `write_output` builds a new one if it is called again.
+        self.output_processor = None;
 
         pty_tx.shutdown();
         info.terminate_child_process();
@@ -3319,7 +3329,7 @@ fn spawn_task_subprocess(
                 let events_tx = events_tx.clone();
                 async move {
                     let Some(mut reader) = reader else { return };
-                    let mut processor = Processor::<StdSyncHandler>::new();
+                    let mut processor = OutputParser::new();
                     let mut buffer = [0u8; 8192];
                     let mut previous_byte_was_cr = false;
                     loop {
@@ -3334,7 +3344,7 @@ fn spawn_task_subprocess(
                                     convert_lf_to_crlf(&buffer[..count], &mut previous_byte_was_cr);
                                 {
                                     let mut term = term.lock();
-                                    processor.advance(&mut *term, &converted);
+                                    processor.advance(&mut term, &converted);
                                 }
                                 events_tx
                                     .unbounded_send(PtyEvent::Event(TerminalBackendEvent::Wakeup))
@@ -4760,6 +4770,133 @@ mod tests {
         );
     }
 
+    fn display_only_terminal(cx: &mut TestAppContext) -> Entity<Terminal> {
+        cx.new(|cx| {
+            TerminalBuilder::new_display_only(
+                SettingsCursorShape::default(),
+                AlternateScroll::On,
+                None,
+                0,
+                cx.background_executor(),
+                PathStyle::local(),
+            )
+            .subscribe(cx)
+        })
+    }
+
+    fn raw_content(chunks: &[&[u8]], cx: &mut TestAppContext) -> Content {
+        let terminal = display_only_terminal(cx);
+        for chunk in chunks {
+            terminal.update(cx, |terminal, cx| terminal.write_raw_output(chunk, cx));
+        }
+        terminal.read_with(cx, |terminal, _| {
+            let term = terminal.term.lock_unfair();
+            make_content(&term, &terminal.last_content)
+        })
+    }
+
+    #[gpui::test]
+    async fn test_write_raw_output_preserves_line_control_semantics(cx: &mut TestAppContext) {
+        let bytes = b"a\nb\rc\r\nd";
+        let raw = raw_content(&[bytes], cx);
+
+        let normalized_terminal = display_only_terminal(cx);
+        normalized_terminal.update(cx, |terminal, cx| terminal.write_output(bytes, cx));
+        let normalized = normalized_terminal.read_with(cx, |terminal, _| {
+            let term = terminal.term.lock_unfair();
+            make_content(&term, &terminal.last_content)
+        });
+
+        let raw_cells = raw
+            .cells
+            .iter()
+            .map(|cell| (cell.point.line, cell.point.column, cell.character()))
+            .collect::<Vec<_>>();
+        let normalized_cells = normalized
+            .cells
+            .iter()
+            .map(|cell| (cell.point.line, cell.point.column, cell.character()))
+            .collect::<Vec<_>>();
+
+        assert!(raw_cells.contains(&(0, 0, 'a')));
+        assert!(raw_cells.contains(&(1, 0, 'c')));
+        assert!(raw_cells.contains(&(1, 1, 'b')));
+        assert!(raw_cells.contains(&(2, 0, 'd')));
+        assert!(!normalized_cells.contains(&(1, 1, 'b')));
+        assert!(normalized_cells.contains(&(1, 0, 'c')));
+        assert!(normalized_cells.contains(&(2, 0, 'd')));
+        assert_eq!(raw.cursor.point, Point::new(2, 1));
+        assert_eq!(normalized.cursor.point, Point::new(2, 1));
+    }
+
+    #[gpui::test]
+    async fn test_write_raw_output_is_independent_of_chunk_boundaries(cx: &mut TestAppContext) {
+        let bytes = b"A\nB\rC\r\n\x1b[31mR\xc3\xa9\x1b[0m\x1b[2;6HX";
+        let whole = raw_content(&[bytes], cx);
+        let cells = |content: &Content| {
+            content
+                .cells
+                .iter()
+                .map(|cell| (cell.point, cell.cell.clone()))
+                .collect::<Vec<_>>()
+        };
+        let whole_cells = cells(&whole);
+        let whole_cursor = whole.cursor.point;
+
+        let red_r = whole
+            .cells
+            .iter()
+            .find(|cell| cell.character() == 'R')
+            .expect("raw output should contain the styled R");
+        assert_eq!(red_r.point, Point::new(2, 0));
+        assert_eq!(red_r.foreground(), Color::Named(NamedColor::Red));
+        let accented = whole
+            .cells
+            .iter()
+            .find(|cell| cell.character() == 'é')
+            .expect("raw output should contain the complete UTF-8 character");
+        assert_eq!(accented.point, Point::new(2, 1));
+        assert_eq!(accented.foreground(), Color::Named(NamedColor::Red));
+        let positioned = whole
+            .cells
+            .iter()
+            .find(|cell| cell.point == Point::new(1, 5))
+            .expect("cursor movement should position X");
+        assert_eq!(positioned.character(), 'X');
+        assert_eq!(
+            positioned.foreground(),
+            Color::Named(NamedColor::Foreground)
+        );
+        assert_eq!(
+            positioned.background(),
+            Color::Named(NamedColor::Background)
+        );
+        assert_eq!(whole_cursor, Point::new(1, 6));
+
+        for split in 0..=bytes.len() {
+            let (first, second) = bytes.split_at(split);
+            let split_content = raw_content(&[b"", first, b"", second, b""], cx);
+            assert_eq!(
+                cells(&split_content),
+                whole_cells,
+                "two-part split at byte {split}"
+            );
+            assert_eq!(
+                split_content.cursor.point, whole_cursor,
+                "two-part cursor at byte {split}"
+            );
+        }
+
+        let byte_chunks = bytes
+            .iter()
+            .map(std::slice::from_ref)
+            .chain(std::iter::once(&[][..]))
+            .collect::<Vec<_>>();
+        let bytewise = raw_content(&byte_chunks, cx);
+        assert_eq!(cells(&bytewise), whole_cells);
+        assert_eq!(bytewise.cursor.point, whole_cursor);
+    }
+
     #[gpui::test]
     async fn test_display_only_write_output_ignores_osc52(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -4780,13 +4917,16 @@ mod tests {
             .subscribe(cx)
         });
 
-        terminal.update(cx, |terminal, cx| {
-            terminal.write_output(b"\x1b]52;c;b3ZlcndyaXR0ZW4=\x07", cx);
-        });
-        cx.run_until_parked();
+        for write_output in [Terminal::write_output, Terminal::write_raw_output] {
+            terminal.update(cx, |terminal, cx| {
+                write_output(terminal, b"\x1b]52;c;b3ZlcndyaXR0ZW4=\x07", cx);
+            });
+            cx.run_until_parked();
 
-        let clipboard_text = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
-        assert_eq!(clipboard_text.as_deref(), Some("original"));
+            let clipboard_text =
+                cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+            assert_eq!(clipboard_text.as_deref(), Some("original"));
+        }
     }
 
     mod hyperlinks {
@@ -5676,6 +5816,50 @@ mod tests {
             content.contains("done"),
             "Output should still be present after no-op kill, got: {content}"
         );
+    }
+
+    /// The parse buffer `write_output` needs is only built for injected bytes and
+    /// must not outlive the command, even though the terminal does.
+    #[gpui::test]
+    async fn test_release_pty_resources_drops_an_allocated_parse_buffer(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+
+        let terminal = build_test_terminal(cx, "echo", &["captured_output"]).await;
+
+        assert!(
+            terminal.read_with(cx, |terminal, _| terminal.output_processor.is_none()),
+            "a terminal that received no injected output should not hold a parse buffer"
+        );
+
+        let exit_status =
+            terminal.read_with(cx, |terminal, cx| terminal.wait_for_completed_task(cx));
+        assert_eq!(exit_status.await, Some(ExitStatus::default()));
+        assert_content_eventually(&terminal, "captured_output", cx).await;
+
+        terminal.update(cx, |terminal, cx| {
+            terminal.write_output(b"injected_before_release\n", cx);
+            terminal.write_raw_output(b"\x1b[", cx);
+        });
+        assert!(
+            terminal.read_with(cx, |terminal, _| terminal.output_processor.is_some()),
+            "injecting output should build the parse buffer"
+        );
+
+        terminal.update(cx, |terminal, _| terminal.release_pty_resources());
+        assert!(
+            terminal.read_with(cx, |terminal, _| terminal.output_processor.is_none()),
+            "releasing the PTY should drop the parse buffer"
+        );
+
+        assert_content_eventually(&terminal, "captured_output", cx).await;
+        terminal.update(cx, |terminal, cx| {
+            terminal.write_output(b"injected_after_release\n", cx);
+        });
+        assert!(
+            terminal.read_with(cx, |terminal, _| terminal.output_processor.is_some()),
+            "injecting output after a release should build a new parse buffer"
+        );
+        assert_content_eventually(&terminal, "injected_after_release", cx).await;
     }
 
     mod perf {
