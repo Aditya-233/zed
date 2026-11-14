@@ -53,7 +53,7 @@ pub struct TextSystem {
     font_ids_by_font: RwLock<FxHashMap<Font, Result<FontId>>>,
     font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
     raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
-    wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<LineWrapper>>>,
+    wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<CharWidthCache>>>,
     font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
     fallback_font_stack: SmallVec<[Font; 2]>,
 }
@@ -323,12 +323,12 @@ impl TextSystem {
     pub fn line_wrapper(self: &Arc<Self>, font: Font, font_size: Pixels) -> LineWrapperHandle {
         let lock = &mut self.wrapper_pool.lock();
         let font_id = self.resolve_font(&font);
-        let wrappers = lock
+        let char_widths = lock
             .entry(FontIdWithSize { font_id, font_size })
-            .or_default();
-        let wrapper = wrappers
+            .or_default()
             .pop()
-            .unwrap_or_else(|| LineWrapper::new(font_id, font_size, self.clone()));
+            .unwrap_or_default();
+        let wrapper = LineWrapper::new(font_id, font_size, self.clone(), char_widths);
 
         LineWrapperHandle {
             wrapper: Some(wrapper),
@@ -540,7 +540,7 @@ impl WindowTextSystem {
         let mut process_line = |line_text: SharedString, line_start, line_end| {
             font_runs.clear();
 
-            let mut decoration_runs = <Vec<DecorationRun>>::with_capacity(32);
+            let mut decoration_runs = <Vec<DecorationRun>>::new();
             let mut run_start = line_start;
             while run_start < line_end {
                 let Some(run) = runs.peek_mut() else {
@@ -658,13 +658,26 @@ impl WindowTextSystem {
     /// Subsets of the line can be styled independently with the `runs` parameter.
     /// Generally, you should prefer to use [`Self::shape_line`] instead, which
     /// can be painted directly.
-    pub fn layout_line(
+    pub fn layout_line<Text>(
         &self,
-        text: &str,
+        text: Text,
         font_size: Pixels,
         runs: &[TextRun],
         force_width: Option<Pixels>,
-    ) -> Arc<LineLayout> {
+    ) -> Arc<LineLayout>
+    where
+        Text: AsRef<str>,
+        SharedString: From<Text>,
+    {
+        let font_runs = self.font_runs(runs);
+        let layout = self
+            .line_layout_cache
+            .layout_line(text, font_size, &font_runs, force_width);
+        self.font_runs_pool.lock().push(font_runs);
+        layout
+    }
+
+    fn font_runs(&self, runs: &[TextRun]) -> Vec<FontRun> {
         let mut last_run = None::<&TextRun>;
         let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
         font_runs.clear();
@@ -697,16 +710,7 @@ impl WindowTextSystem {
             }
         }
 
-        let layout = self.line_layout_cache.layout_line(
-            &SharedString::new(text),
-            font_size,
-            &font_runs,
-            force_width,
-        );
-
-        self.font_runs_pool.lock().push(font_runs);
-
-        layout
+        font_runs
     }
 
     /// Returns the shaped layout width of for the given character, in the given font and size.
@@ -878,7 +882,7 @@ impl Drop for LineWrapperHandle {
                 font_size: wrapper.font_size,
             })
             .unwrap()
-            .push(wrapper);
+            .push(wrapper.into_char_widths());
     }
 }
 
@@ -1218,5 +1222,27 @@ pub fn font_name_with_fallbacks_shared<'a>(
         ".ZedSans" | "Zed Plex Sans" => const { &SharedString::new_static("IBM Plex Sans") },
         ".ZedMono" | "Zed Plex Mono" => const { &SharedString::new_static("Lilex") },
         _ => name,
+    }
+}
+
+#[cfg(test)]
+mod line_wrapper_pool_tests {
+    use super::*;
+    use crate::NoopTextSystem;
+
+    #[test]
+    fn pooled_line_wrappers_do_not_retain_text_system() {
+        let text_system = Arc::new(TextSystem::new(Arc::new(NoopTextSystem::new())));
+        let weak_text_system = Arc::downgrade(&text_system);
+
+        let mut wrapper = text_system.line_wrapper(font(".ZedMono"), px(16.));
+        let fragments = [LineFragment::text("hello world")];
+        wrapper
+            .wrap_line(&fragments, px(40.), IndentAdjustment::default())
+            .for_each(drop);
+        drop(wrapper);
+        drop(text_system);
+
+        assert!(weak_text_system.upgrade().is_none());
     }
 }

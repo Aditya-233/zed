@@ -412,10 +412,11 @@ impl WrappedLineLayout {
                     .unwrapped_layout
                     .closest_index_for_x(position_in_unwrapped_line.x))
             } else {
-                Ok(self
-                    .unwrapped_layout
+                // The shaper can place a trailing zero-width wrap boundary glyph slightly past
+                // the line's width, so the row can extend past where `index_for_x` has glyphs.
+                self.unwrapped_layout
                     .index_for_x(position_in_unwrapped_line.x)
-                    .unwrap())
+                    .ok_or(wrapped_line_end_index)
             }
         }
     }
@@ -1022,7 +1023,25 @@ impl AsCacheKeyRef for CacheKeyRef<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GlyphId;
+    use crate::{GlyphId, NoopTextSystem, TextRun, TextSystem, WindowTextSystem, font};
+
+    #[test]
+    fn shape_line_shares_its_text_with_the_layout_cache() {
+        let text_system =
+            WindowTextSystem::new(Arc::new(TextSystem::new(Arc::new(NoopTextSystem::new()))));
+        // Long enough to be stored on the heap rather than inline.
+        let text = SharedString::from("let value = compute_something(argument_one, argument_two);");
+        let runs = [TextRun {
+            len: text.len(),
+            font: font(".ZedMono"),
+            ..Default::default()
+        }];
+
+        text_system.shape_line(text.clone(), px(14.), &runs, None);
+        let state = text_system.line_layout_cache.state.borrow();
+        let (key, _) = state.current_frame.lines.iter().next().unwrap();
+        assert_eq!(key.text.as_ptr(), text.as_ptr());
+    }
 
     fn glyph_at(x: f32, index: usize) -> ShapedGlyph {
         ShapedGlyph {

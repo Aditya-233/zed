@@ -349,7 +349,7 @@ thread_local! {
 /// arrive re-entrantly while a draw is already on the stack (e.g. via nested
 /// message pumping in the Windows window procedure), instead of running a
 /// nested draw or panicking on the already-borrowed App.
-fn draw_in_progress() -> bool {
+pub(crate) fn draw_in_progress() -> bool {
     CURRENT_ELEMENT_ARENA.with(|current| current.get().is_some())
 }
 
@@ -480,10 +480,10 @@ impl ArenaClearNeeded {
     /// reference.
     pub fn clear(self, cx: &mut App) {
         assert!(
-            std::ptr::eq(self.arena, &cx.element_arena),
+            std::ptr::eq(self.arena, &*cx.element_arena),
             "ArenaClearNeeded::clear called with a different App than the draw ran against"
         );
-        cx.element_arena.borrow_mut().clear();
+        RefCell::borrow_mut(&cx.element_arena).clear();
     }
 }
 
@@ -962,11 +962,59 @@ pub(crate) struct TooltipRequest {
     tooltip: AnyTooltip,
 }
 
+/// The ids of the elements being drawn, root first, with the hash of every
+/// prefix alongside: a [`GlobalElementId`] for the current element is then
+/// the ids cloned out and the hash on top of the stack, without walking the
+/// path — the ids of every ancestor, string names byte by byte — for each
+/// element on every frame.
+#[derive(Clone, Default)]
+pub(crate) struct ElementIdStack {
+    ids: SmallVec<[ElementId; 32]>,
+    hashes: SmallVec<[u64; 32]>,
+}
+
+impl ElementIdStack {
+    pub(crate) fn push(&mut self, id: ElementId) {
+        self.hashes.push(crate::extend_path_hash(self.hash(), &id));
+        self.ids.push(id);
+    }
+
+    pub(crate) fn pop(&mut self) -> Option<ElementId> {
+        self.hashes.pop();
+        self.ids.pop()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.ids.clear();
+        self.hashes.clear();
+    }
+
+    /// The hash of the whole path on the stack.
+    fn hash(&self) -> u64 {
+        self.hashes
+            .last()
+            .copied()
+            .unwrap_or(crate::EMPTY_PATH_HASH)
+    }
+
+    pub(crate) fn global_id(&self) -> GlobalElementId {
+        GlobalElementId::with_hash(&self.ids, self.hash())
+    }
+}
+
+impl std::ops::Deref for ElementIdStack {
+    type Target = [ElementId];
+
+    fn deref(&self) -> &Self::Target {
+        &self.ids
+    }
+}
+
 pub(crate) struct DeferredDraw {
     current_view: EntityId,
     priority: usize,
     parent_node: DispatchNodeId,
-    element_id_stack: SmallVec<[ElementId; 32]>,
+    element_id_stack: ElementIdStack,
     text_style_stack: Vec<TextStyleRefinement>,
     content_mask: Option<ContentMask<Pixels>>,
     rem_size: Pixels,
@@ -1162,7 +1210,7 @@ pub struct Window {
     pub(crate) viewport_size: Size<Pixels>,
     layout_engine: Option<TaffyLayoutEngine>,
     pub(crate) root: Option<AnyView>,
-    pub(crate) element_id_stack: SmallVec<[ElementId; 32]>,
+    pub(crate) element_id_stack: ElementIdStack,
     pub(crate) text_style_stack: Vec<TextStyleRefinement>,
     pub(crate) rendered_entity_stack: Vec<EntityId>,
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
@@ -1250,6 +1298,59 @@ pub(crate) struct InputRateTracker {
     sustain_duration: Duration,
 }
 
+const THIRTY_FPS_INTERVAL: Duration = Duration::from_micros(33333);
+const SIXTY_FPS_INTERVAL: Duration = Duration::from_micros(16667);
+const FRAME_INTERVAL_TOLERANCE: Duration = Duration::from_millis(1);
+
+/// Keeps throttled frames on a stable cadence despite callback delivery jitter.
+#[derive(Default)]
+struct FramePacer {
+    last_frame: Option<Instant>,
+}
+
+impl FramePacer {
+    fn should_defer(&mut self, now: Instant, minimum_interval: Option<Duration>) -> bool {
+        if let Some(interval) = minimum_interval
+            && let Some(last_frame) = self.last_frame
+        {
+            let deadline = last_frame + interval;
+            if now + FRAME_INTERVAL_TOLERANCE < deadline {
+                return true;
+            }
+            // Correct small dispatch delays without shifting subsequent deadlines,
+            // but bound the correction to a quarter interval. Larger delays restart
+            // the cadence so recovery cannot produce closely spaced catch-up frames.
+            self.last_frame = Some(if now.saturating_duration_since(deadline) <= interval / 4 {
+                deadline
+            } else {
+                now
+            });
+        } else {
+            self.last_frame = Some(now);
+        }
+        false
+    }
+}
+
+fn minimum_frame_interval(
+    should_throttle: bool,
+    inactive_without_high_rate_input: bool,
+    inactive_frame_interval: Option<Duration>,
+    thermal_state: Option<ThermalState>,
+) -> Option<Duration> {
+    if !should_throttle {
+        None
+    } else if inactive_without_high_rate_input {
+        inactive_frame_interval
+    } else if matches!(
+        thermal_state,
+        Some(ThermalState::Critical | ThermalState::Serious)
+    ) {
+        Some(SIXTY_FPS_INTERVAL)
+    } else {
+        None
+    }
+}
 impl Default for InputRateTracker {
     fn default() -> Self {
         Self {
@@ -1577,7 +1678,6 @@ impl Window {
         let scene_animation_interval = Rc::new(Cell::new(None::<Duration>));
         let next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>> = Default::default();
         let input_rate_tracker = Rc::new(RefCell::new(InputRateTracker::default()));
-        let last_frame_time = Rc::new(Cell::new(None));
 
         platform_window
             .request_decorations(window_decorations.unwrap_or(WindowDecorations::Server));
@@ -1692,6 +1792,7 @@ impl Window {
             let next_frame_callbacks = next_frame_callbacks.clone();
             let input_rate_tracker = input_rate_tracker.clone();
             let mut deferred_force_render = false;
+            let mut frame_pacer = FramePacer::default();
             move |request_frame_options| {
                 #[cfg(feature = "profiler")]
                 let _foreground_turn = profiler::journal::foreground_turn();
@@ -1725,41 +1826,50 @@ impl Window {
                     .update(&mut cx, |_, _, cx| cx.thermal_state())
                     .log_err();
 
-                let min_frame_interval = if request_frame_options.require_presentation
-                    || (!request_frame_options.force_render
-                        && next_frame_callbacks.borrow().is_empty())
-                {
-                    None
-                } else if !active.get() && !input_rate_tracker.borrow_mut().is_high_rate() {
-                    inactive_frame_interval
-                } else if let Some(ThermalState::Critical | ThermalState::Serious) = thermal_state {
-                    Some(Duration::from_micros(16667))
-                } else {
-                    None
-                };
+                // Keep presenting briefly after high-rate input to prevent display
+                // underclocking, but subject to the same power limits as redraws.
+                let high_rate_input = input_rate_tracker.borrow_mut().is_high_rate();
+                let has_next_frame_callbacks = !next_frame_callbacks.borrow().is_empty();
+                let has_frame_demand = invalidator.is_dirty()
+                    || force_render
+                    || has_next_frame_callbacks
+                    || request_frame_options.require_presentation
+                    || needs_present.get()
+                    || scene_animation_interval.get().is_some()
+                    || high_rate_input;
+
+                // Throttle frame rate based on conditions:
+                // - Thermal pressure (Serious/Critical): cap to ~60fps
+                // - Inactive window (not focused): use its configured frame interval
+                let should_throttle = !request_frame_options.require_presentation;
+                let inactive_without_high_rate_input =
+                    should_throttle && !active.get() && !high_rate_input;
+                let min_frame_interval = minimum_frame_interval(
+                    should_throttle,
+                    inactive_without_high_rate_input,
+                    inactive_frame_interval,
+                    thermal_state,
+                );
                 let animation_frame_interval = scene_animation_interval
                     .get()
                     .filter(|interval| !interval.is_zero());
                 let min_frame_interval = min_frame_interval.max(animation_frame_interval);
 
                 let now = Instant::now();
-                if let Some(min_interval) = min_frame_interval {
-                    if let Some(last_frame) = last_frame_time.get()
-                        && now.duration_since(last_frame) < min_interval
-                    {
-                        // Don'''t lose a pending forced render to throttling.
-                        deferred_force_render |= force_render;
-                        // Deferred by throttling: ask demand-driven platforms to retry.
-                        handle
-                            .update(&mut cx, |_, window, _| {
-                                window.platform_window.schedule_frame();
-                            })
-                            .log_err();
-                        invalidator.wake_platform();
-                        return;
-                    }
-                }                }
-                last_frame_time.set(Some(now));
+                // Idle display-link ticks must neither consume a frame slot nor
+                // wake a demand-driven frame source.
+                if has_frame_demand && frame_pacer.should_defer(now, min_frame_interval) {
+                    // Don't lose a pending forced render to throttling.
+                    deferred_force_render |= force_render;
+                    // Deferred by throttling: ask demand-driven platforms to retry.
+                    handle
+                        .update(&mut cx, |_, window, _| {
+                            window.platform_window.schedule_frame();
+                        })
+                        .log_err();
+                    invalidator.wake_platform();
+                    return;
+                }
 
                 let pending_next_frame_callbacks = next_frame_callbacks.take();
                 if !pending_next_frame_callbacks.is_empty() {
@@ -1772,15 +1882,13 @@ impl Window {
                         .log_err();
                 }
 
-                // Keep presenting if input was recently arriving at a high rate (>= 60fps).
-                // Once high-rate input is detected, we sustain presentation for 1 second
-                // to prevent display underclocking during active input.
+                let should_draw = invalidator.is_dirty() || force_render;
                 let needs_present = request_frame_options.require_presentation
                     || needs_present.get()
                     || scene_animation_interval.get().is_some()
-                    || input_rate_tracker.borrow_mut().is_high_rate();
-
-                if invalidator.is_dirty() || force_render || scene_animation_interval.get().is_some() {                    measure("frame duration", || {
+                    || high_rate_input;
+                if should_draw || scene_animation_interval.get().is_some() {
+                    measure("frame duration", || {
                         handle
                             .update(&mut cx, |_, window, cx| {
                                 if force_render {
@@ -1999,7 +2107,7 @@ impl Window {
             viewport_size: content_size,
             layout_engine: Some(TaffyLayoutEngine::new()),
             root: None,
-            element_id_stack: SmallVec::default(),
+            element_id_stack: ElementIdStack::default(),
             text_style_stack: Vec::new(),
             rendered_entity_stack: Vec::new(),
             element_offset_stack: Vec::new(),
@@ -2833,7 +2941,7 @@ impl Window {
         f: impl FnOnce(&GlobalElementId, &mut Self) -> R,
     ) -> R {
         self.with_id(element_id, |this| {
-            let global_id = GlobalElementId(Arc::from(&*this.element_id_stack));
+            let global_id = this.element_id_stack.global_id();
 
             f(&global_id, this)
         })
@@ -4582,11 +4690,13 @@ impl Window {
     }
 
     fn should_use_subpixel_rendering(&self, font_id: FontId, font_size: Pixels) -> bool {
-        if self.platform_window.background_appearance() != WindowBackgroundAppearance::Opaque {
+        // Checked first because it's cheap, while some platforms lock the window to read its
+        // background appearance, and this runs for every glyph.
+        if !self.platform_window.is_subpixel_rendering_supported() {
             return false;
         }
 
-        if !self.platform_window.is_subpixel_rendering_supported() {
+        if self.platform_window.background_appearance() != WindowBackgroundAppearance::Opaque {
             return false;
         }
 
@@ -5241,9 +5351,10 @@ impl Window {
     fn reset_cursor_style(&self, cx: &mut App) {
         // Set the cursor only if we're the active window.
         if self.is_window_hovered() {
-            let style = self
-                .rendered_frame
-                .cursor_style(self)
+            // A drag can start before the next paint records its cursor in the frame.
+            let style = cx
+                .active_drag_cursor_style()
+                .or_else(|| self.rendered_frame.cursor_style(self))
                 .unwrap_or(CursorStyle::Arrow);
             cx.platform.set_cursor_style(style);
         }
@@ -5631,14 +5742,11 @@ impl Window {
     }
 
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
-        let hit_test = self.rendered_frame.hit_test(self.mouse_position());
-        if hit_test != self.mouse_hit_test {
-            self.mouse_hit_test = hit_test;
-            self.reset_cursor_style(cx);
-        }
+        self.mouse_hit_test = self.rendered_frame.hit_test(self.mouse_position());
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         if self.is_inspector_picking(cx) {
+            self.reset_cursor_style(cx);
             self.handle_inspector_mouse_event(event, cx);
             // When inspector is picking, all other mouse handling is skipped.
             return;
@@ -5686,6 +5794,10 @@ impl Window {
         if event.is::<MouseUpEvent>() && self.captured_hitbox.is_some() {
             self.captured_hitbox = None;
         }
+
+        // Runs after the listeners so that a drag they start takes effect in this event. Resolving
+        // the cursor any earlier would briefly select whatever is under the pointer instead.
+        self.reset_cursor_style(cx);
     }
 
     fn dispatch_key_event(&mut self, event: &dyn Any, cx: &mut App) {
@@ -7471,14 +7583,122 @@ mod tests {
     };
 
     use crate::{
-        AnyWindowHandle, AppContext as _, Bounds, Context, DispatchPhase, DragMoveEvent, Empty,
+        AnyWindowHandle, AppContext as _, Bounds, Context, CursorStyle, DispatchPhase, DragMoveEvent, Empty,
         ExternalDragPayload, ExternalPaths, FileDragPaths, FileDropEvent, FocusHandle,
         InputEvent as _, InteractiveElement as _, IntoElement, LongPressEvent, MouseButton,
-        MouseDownEvent, MouseMoveEvent, ParentElement, Pixels, Point, Render, RequestFrameOptions,
+        MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, RequestFrameOptions,
         StatefulInteractiveElement as _, Styled, TestAppContext, TouchDragEvent, TouchEvent,
         TouchId, TouchPhase, Window, WindowAppearance, WindowOptions, canvas, div, point, px, size,
+
+    #[gpui::test]
+    fn test_drag_cursor_applies_before_next_paint(cx: &mut TestAppContext) {
+        struct ResizeHandle;
+
+        impl Render for ResizeHandle {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().cursor_text().child(
+                    div()
+                        .id("resize-handle")
+                        .w(px(4.))
+                        .h_full()
+                        .cursor_col_resize()
+                        .on_drag((), |_, _, _, cx| cx.new(|_| Empty)),
+                )
+            }
+        }
+
+        let window = cx.add_window(|_, _| ResizeHandle);
+        let handle_position = point(px(1.), px(10.));
+        let drag_position = point(px(20.), px(10.));
+        let cursor_observer = cx.clone();
+
+        let update_result = cx.update_window(window.into(), |_, window, cx| {
+            window.hovered.set(true);
+            window.active.set(true);
+            window.draw(cx).clear(cx);
+            window.dispatch_event(
+                MouseMoveEvent {
+                    position: handle_position,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.dispatch_event(
+                MouseDownEvent {
+                    position: handle_position,
+                    button: MouseButton::Left,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.dispatch_event(
+                MouseMoveEvent {
+                    position: drag_position,
+                    pressed_button: Some(MouseButton::Left),
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            assert!(cx.has_active_drag());
+            // Asserted here because leaving this update flushes effects, which paints a frame.
+            assert_eq!(
+                cursor_observer.test_platform().cursor_style(),
+                CursorStyle::ResizeColumn
+            );
+
+            window.draw(cx).clear(cx);
+            window.dispatch_event(
+                MouseUpEvent {
+                    position: drag_position,
+                    button: MouseButton::Left,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+        });
+        assert!(update_result.is_ok());
+    }
     };
 
+    #[test]
+    fn frame_throttle_tracks_display_refreshes() {
+        let start = super::Instant::now();
+        for (elapsed, interval) in [
+            (Duration::from_micros(16_666), super::SIXTY_FPS_INTERVAL),
+            (Duration::from_micros(33_332), super::THIRTY_FPS_INTERVAL),
+        ] {
+            let mut pacer = super::FramePacer::default();
+            assert!(!pacer.should_defer(start, Some(interval)));
+            assert!(pacer.should_defer(start + elapsed / 2, Some(interval)));
+            assert!(!pacer.should_defer(start + elapsed, Some(interval)));
+        }
+    }
+
+    #[test]
+    fn frame_throttle_preserves_cadence_without_catching_up_after_stalls() {
+        let start = super::Instant::now();
+        let interval = super::THIRTY_FPS_INTERVAL;
+        let mut pacer = super::FramePacer::default();
+        assert!(!pacer.should_defer(start, Some(interval)));
+        let delayed_frame = start + interval + Duration::from_millis(5);
+        assert!(!pacer.should_defer(delayed_frame, Some(interval)));
+        assert!(pacer.should_defer(start + interval + interval / 2, Some(interval)));
+        assert!(!pacer.should_defer(start + interval * 2, Some(interval)));
+
+        // Even a stall just short of another full interval must not cause a burst.
+        let after_stall = start + interval * 4 - Duration::from_millis(1);
+        assert!(!pacer.should_defer(after_stall, Some(interval)));
+        assert!(pacer.should_defer(after_stall + interval / 2, Some(interval)));
+        assert!(!pacer.should_defer(after_stall + interval, Some(interval)));
+        // Mandatory presentation bypasses the limit and establishes a fresh cadence.
+        let mandatory_frame = after_stall + interval + Duration::from_millis(2);
+        assert!(!pacer.should_defer(mandatory_frame, None));
+        assert!(pacer.should_defer(mandatory_frame + interval / 2, Some(interval)));
+    }
     struct EmptyView;
 
     impl Render for EmptyView {
@@ -7545,6 +7765,8 @@ mod tests {
     fn test_frame_waker_fires_on_frame_demand(cx: &mut TestAppContext) {
         let window = cx.add_window(|_, _| EmptyView);
         let test_window = cx.test_window(window.into());
+        // This test exercises idle wakeups, not the inactive-window frame limit.
+        test_window.simulate_active_status_change(true);
 
         // Windows start dirty, and that can predate waker installation;
         // installing the waker must deliver the pending wake or the first
