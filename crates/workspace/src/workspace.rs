@@ -2720,6 +2720,15 @@ impl Workspace {
         &self.app_state
     }
 
+    pub fn is_restoring(&self) -> bool {
+        self.restoring_workspace
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_restoring_workspace(&mut self, restoring: bool) {
+        self.restoring_workspace = restoring;
+    }
+
     pub fn set_panels_task(&mut self, task: Task<Result<()>>) {
         self._panels_task = Some(task);
     }
@@ -4109,6 +4118,13 @@ impl Workspace {
 
     pub fn active_item(&self, cx: &App) -> Option<Box<dyn ItemHandle>> {
         self.active_pane().read(cx).active_item()
+    }
+
+    pub fn item_for_action(&self, window: &Window, cx: &App) -> Option<Box<dyn ItemHandle>> {
+        self.items(cx)
+            .find(|item| item.item_focus_handle(cx).contains_focused(window, cx))
+            .map(|item| item.boxed_clone())
+            .or_else(|| self.active_item(cx))
     }
 
     pub fn active_item_as<I: 'static>(&self, cx: &App) -> Option<Entity<I>> {

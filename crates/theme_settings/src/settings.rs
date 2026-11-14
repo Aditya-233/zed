@@ -4,8 +4,8 @@ use crate::schema::{status_colors_refinement, syntax_overrides, theme_colors_ref
 use crate::{merge_accent_colors, merge_player_colors};
 use collections::HashMap;
 use gpui::{
-    App, Context, Font, FontFallbacks, FontStyle, Global, Pixels, SharedString, Subscription,
-    Window, px,
+    App, Context, Font, FontFallbacks, FontStyle, FontWeight, Global, Pixels, SharedString,
+    Subscription, Window, px,
 };
 use refineable::Refineable;
 use schemars::JsonSchema;
@@ -75,6 +75,11 @@ pub struct ThemeSettings {
     /// The theme to use for the markdown preview.
     /// Falls back to the main editor theme if unset.
     pub markdown_preview_theme: Option<ThemeSelection>,
+    /// The font family used for Mermaid diagrams.
+    /// Falls back to the UI font family if unset.
+    mermaid_font_family: Option<SharedString>,
+    /// The font weight for headings in the markdown preview.
+    markdown_preview_heading_font_weight: FontWeight,
     /// The line height for buffers, and the terminal.
     ///
     /// Changing this may affect the spacing of some UI elements.
@@ -442,6 +447,19 @@ impl ThemeSettings {
             .unwrap_or(&self.buffer_font.family)
     }
 
+    /// Returns the font family to use for Mermaid diagrams,
+    /// falling back to the UI font family when unset.
+    pub fn mermaid_font_family(&self) -> &SharedString {
+        self.mermaid_font_family
+            .as_ref()
+            .unwrap_or(&self.ui_font.family)
+    }
+
+    /// Returns the font weight to use for headings in the markdown preview.
+    pub fn markdown_preview_heading_font_weight(&self) -> FontWeight {
+        self.markdown_preview_heading_font_weight
+    }
+
     /// Returns the markdown preview font size.
     ///
     /// Note: the fallback deliberately uses `self.ui_font_size` instead of `ui_font_size(cx)`,
@@ -702,8 +720,9 @@ fn font_fallbacks_from_settings(
 }
 
 impl settings::Settings for ThemeSettings {
-    fn from_settings(content: &settings::SettingsContent) -> Self {
-        let content = &content.theme;
+    fn from_settings(settings_content: &settings::SettingsContent) -> Self {
+        let content = &settings_content.theme;
+        let markdown_preview = settings_content.markdown_preview.as_ref();
         let theme_selection: ThemeSelection = content.theme.clone().unwrap().into();
         let icon_theme_selection: IconThemeSelection = content.icon_theme.clone().unwrap().into();
         Self {
@@ -743,19 +762,26 @@ impl settings::Settings for ThemeSettings {
                 .map(|font| font.0.clone().into()),
             agent_buffer_font_size: content.agent_buffer_font_size.map(|s| s.into_gpui()),
             git_commit_buffer_font_size: content.git_commit_buffer_font_size.map(|s| s.into_gpui()),
-            markdown_preview_font_family: content
-                .markdown_preview_font_family
-                .as_ref()
+            markdown_preview_font_family: markdown_preview
+                .and_then(|preview| preview.font_family.as_ref())
                 .map(|f| f.0.clone().into()),
-            markdown_preview_code_font_family: content
-                .markdown_preview_code_font_family
-                .as_ref()
+            markdown_preview_code_font_family: markdown_preview
+                .and_then(|preview| preview.code_font_family.as_ref())
                 .map(|f| f.0.clone().into()),
-            markdown_preview_font_size: content.markdown_preview_font_size.map(|s| s.into_gpui()),
-            markdown_preview_theme: content
-                .markdown_preview_theme
-                .clone()
+            markdown_preview_font_size: markdown_preview
+                .and_then(|preview| preview.font_size)
+                .map(|size| size.into_gpui()),
+            markdown_preview_theme: markdown_preview
+                .and_then(|preview| preview.theme.clone())
                 .map(ThemeSelection::from),
+            mermaid_font_family: content
+                .mermaid_font_family
+                .as_ref()
+                .map(|font| font.0.clone().into()),
+            markdown_preview_heading_font_weight: markdown_preview
+                .and_then(|preview| preview.heading_font_weight)
+                .map(|weight| weight.into_gpui())
+                .unwrap_or(FontWeight::SEMIBOLD),
             theme: theme_selection,
             experimental_theme_overrides: content.experimental_theme_overrides.clone(),
             theme_overrides: content.theme_overrides.clone(),
