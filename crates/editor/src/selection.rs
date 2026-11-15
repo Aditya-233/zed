@@ -2093,7 +2093,11 @@ impl Editor {
         let mut state = self.prepare_selection_effects(effects, history_entry);
         let (changed, result) = self.change_selections_without_effects(&snapshot, change);
         state.changed = state.changed || changed;
-        self.apply_selection_effects(state, window, cx);
+        if self.defer_selection_effects {
+            self.deferred_selection_effects_state = Some(state);
+        } else {
+            self.apply_selection_effects(state, window, cx);
+        }
         result
     }
 

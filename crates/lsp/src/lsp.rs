@@ -1144,6 +1144,7 @@ impl LanguageServer {
                             additional_properties_support: Some(true),
                         }),
                     }),
+                    show_document: Some(ShowDocumentClientCapabilities { support: true }),
                     ..WindowClientCapabilities::default()
                 }),
             },

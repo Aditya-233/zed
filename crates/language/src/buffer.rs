@@ -3420,8 +3420,8 @@ impl Buffer {
 
     pub fn undo_operations(&mut self, counts: HashMap<Lamport, u32>, cx: &mut Context<Buffer>) {
         let was_dirty = self.is_dirty();
-        let operation = self.text.undo_operations(counts);
         let old_version = self.version.clone();
+        let operation = self.text.undo_operations(counts);
         self.send_operation(Operation::Buffer(operation), true, cx);
         self.did_edit(&old_version, was_dirty, BufferEditSource::User, cx);
     }
