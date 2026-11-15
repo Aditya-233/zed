@@ -11,7 +11,8 @@ use crate::{
     App, Asset, Bounds, Element, GlobalElementId, Hitbox, InspectorElementId, InteractiveElement,
     Interactivity, IntoElement, LayoutId, Pixels, Point, Radians, SharedString, Size,
     SpriteAnimation, StyleRefinement, Styled, TransformationMatrix, Window, ease_in_out,
-    ease_out_quint, heartbeat, linear, point, px, quadratic, radians, size,};
+    ease_out_quint, heartbeat, linear, point, px, quadratic, radians, size,
+};
 use gpui_util::ResultExt;
 
 /// An SVG element.

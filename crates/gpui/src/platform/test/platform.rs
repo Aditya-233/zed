@@ -4,7 +4,8 @@ use crate::{
     PlatformHeadlessRenderer, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
     PromptButton, ScreenCaptureFrame, ScreenCaptureSource, ScreenCaptureStream, SharedString,
     SourceMetadata, SystemNotification, SystemNotificationResponse, Task, TestDisplay, TestWindow,
-    ThermalState, WindowAppearance, WindowParams, size,};
+    ThermalState, WindowAppearance, WindowParams, size,
+};
 #[cfg(any(test, feature = "test-support"))]
 use crate::{DisplayId, NoopTextSystem, PathPromptOptions};
 use anyhow::Result;
