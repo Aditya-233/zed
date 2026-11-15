@@ -2300,10 +2300,8 @@ async fn test_file_scan_inclusions_from_project_settings(cx: &mut TestAppContext
                     "[".to_string(),
                     "ignored/**/excluded.project".to_string(),
                 ]));
-                settings.project.worktree.file_scan_inclusions = Some(vec![
-                    "...".to_string(),
-                    "ignored/**/*.user".to_string(),
-                ]);
+                settings.project.worktree.file_scan_inclusions =
+                    Some(vec!["...".to_string(), "ignored/**/*.user".to_string()]);
             });
             store
                 .set_local_settings(
