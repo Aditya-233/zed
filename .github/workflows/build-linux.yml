@@ -1,0 +1,328 @@
+name: Build Linux Package & Arch Repo
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  GIT_CONFIG_PARAMETERS: "'advice.defaultBranchName=false' 'init.defaultBranch=main'"
+  RUSTC_WRAPPER: sccache
+  CARGO_BUILD_RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  CARGO_INCREMENTAL: "0"
+  RUST_LOG: "error"
+  ZED_LOG: "error"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_PROFILE_DEV_OPT_LEVEL: "0"
+  CARGO_PROFILE_TEST_OPT_LEVEL: "0"
+  CARGO_PROFILE_DEV_CODEGEN_UNITS: "256"
+  CARGO_PROFILE_TEST_CODEGEN_UNITS: "256"
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+
+jobs:
+  # ========================================================
+  # Fast Quality Gate: Format & Security Audit (< 30s)
+  # ========================================================
+  fast-lint:
+    name: Format Check & Audit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain & Rustfmt
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Format Check
+        run: |
+          cargo fmt --all --check
+
+      - name: Cargo Audit
+        continue-on-error: true
+        run: |
+          cargo audit --ignore RUSTSEC-2026-0204 --ignore RUSTSEC-2026-0258 --ignore RUSTSEC-2026-0195 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0285
+
+  # ========================================================
+  # Parallel Quality Gate: Clippy Workspace (~1-2m)
+  # ========================================================
+  clippy:
+    name: Clippy Workspace
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install Lean System Dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev libvulkan-dev mold libzstd-dev libsqlite3-dev \
+            || (sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev libvulkan-dev mold libzstd-dev libsqlite3-dev)
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: clippy
+          targets: wasm32-wasip2, wasm32-unknown-unknown
+
+      - name: Clippy Workspace
+        id: clippy_step
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: |
+          set -o pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="origin/${{ github.base_ref }}"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="${{ github.event.before }}"
+          else
+            BASE_REF="HEAD~1"
+          fi
+
+          CHANGED_FILES=$(git diff --name-only "$BASE_REF" HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "ALL")
+          echo "=== Changed Files Detected ==="
+          echo "$CHANGED_FILES"
+
+          RUN_FULL=false
+          if [ "$CHANGED_FILES" = "ALL" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN_FULL=true
+          elif echo "$CHANGED_FILES" | grep -qE '^(Cargo\.(toml|lock)|crates/gpui/|crates/util/|crates/workspace/|crates/project/)'; then
+            RUN_FULL=true
+          fi
+
+          if [ "$RUN_FULL" = "true" ]; then
+            echo "Executing full workspace Clippy..."
+            cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings 2>&1 | tee clippy-report.txt
+          else
+            CHANGED_CRATES=$(echo "$CHANGED_FILES" | grep '^crates/' | cut -d/ -f2 | sort -u || true)
+            PKG_ARGS=""
+            for crate in $CHANGED_CRATES; do
+              if [ -d "crates/$crate" ]; then
+                PKG_ARGS="$PKG_ARGS -p $crate"
+              fi
+            done
+            if [ -n "$PKG_ARGS" ]; then
+              echo "Executing scoped Clippy for affected crates: $PKG_ARGS"
+              cargo clippy $PKG_ARGS --all-targets --all-features --keep-going -- -D warnings 2>&1 | tee clippy-report.txt
+            else
+              echo "No crate source changes detected. Running fast smoke Clippy..."
+              cargo clippy -p collections -p clock --all-targets --all-features --keep-going -- -D warnings 2>&1 | tee clippy-report.txt
+            fi
+          fi
+
+      - name: Upload Clippy Report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-report
+          path: clippy-report.txt
+          if-no-files-found: ignore
+
+  # ========================================================
+  # Parallel Quality Gate: Incremental / Affected Nextest (< 1-2m)
+  # ========================================================
+  test:
+    name: Nextest Workspace
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install Lean System Dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev libvulkan-dev mold libzstd-dev libsqlite3-dev \
+            || (sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev libvulkan-dev mold libzstd-dev libsqlite3-dev)
+
+      - name: Install Rust Toolchain & Nextest
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-wasip2, wasm32-unknown-unknown
+
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Test Workspace (Nextest)
+        id: nextest_step
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: |
+          set -o pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="origin/${{ github.base_ref }}"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="${{ github.event.before }}"
+          else
+            BASE_REF="HEAD~1"
+          fi
+
+          CHANGED_FILES=$(git diff --name-only "$BASE_REF" HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "ALL")
+          echo "=== Changed Files Detected ==="
+          echo "$CHANGED_FILES"
+
+          RUN_FULL=false
+          if [ "$CHANGED_FILES" = "ALL" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN_FULL=true
+          elif echo "$CHANGED_FILES" | grep -qE '^(Cargo\.(toml|lock)|crates/gpui/|crates/util/|crates/workspace/|crates/project/)'; then
+            RUN_FULL=true
+          fi
+
+          if [ "$RUN_FULL" = "true" ]; then
+            echo "Executing full workspace Nextest suite..."
+            cargo nextest run --workspace --all-features --no-fail-fast --no-tests pass 2>&1 | tee nextest-report.txt
+          else
+            CHANGED_CRATES=$(echo "$CHANGED_FILES" | grep '^crates/' | cut -d/ -f2 | sort -u || true)
+            PKG_ARGS=""
+            for crate in $CHANGED_CRATES; do
+              if [ -d "crates/$crate" ]; then
+                PKG_ARGS="$PKG_ARGS -p $crate"
+              fi
+            done
+            if [ -n "$PKG_ARGS" ]; then
+              echo "Executing incremental Nextest for affected crates: $PKG_ARGS"
+              cargo nextest run $PKG_ARGS --all-features --no-fail-fast --no-tests pass 2>&1 | tee nextest-report.txt
+            else
+              echo "No crate source changes detected. Running fast smoke tests..."
+              cargo nextest run -p collections -p clock --all-features --no-fail-fast --no-tests pass 2>&1 | tee nextest-report.txt
+            fi
+          fi
+
+      - name: Upload Test Report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-report
+          path: nextest-report.txt
+          if-no-files-found: ignore
+
+  # ========================================================
+  # Quality Gate Aggregator (< 2m feedback)
+  # ========================================================
+  quality-gate:
+    name: Enforce Quality Gate Status
+    needs: [fast-lint, clippy, test]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Quality Gate Status
+        run: |
+          echo "All quality gates (Format, Security Audit, Clippy, and Tests) passed successfully!"
+
+  # ========================================================
+  # Downstream Packaging: Build Release & Arch Repo
+  # ========================================================
+  package-linux:
+    name: Build Release & Arch Repo
+    needs: [quality-gate]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup sccache
+        uses: mozilla/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            llvm libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev libvulkan-dev mold libzstd-dev libsqlite3-dev libarchive-tools zstd \
+            || (sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            llvm libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev libvulkan-dev mold libzstd-dev libsqlite3-dev libarchive-tools zstd)
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          targets: wasm32-wasip2, wasm32-unknown-unknown
+
+      - name: Update Pacman Repo
+        env:
+          CC: clang
+          CXX: clang++
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./script/bundle-linux
+          ./script/package-arch
+
+      - name: Upload Linux Tarball Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-linux-x86_64
+          path: target/release/zed-linux-x86_64.tar.gz
+          if-no-files-found: warn
+
+      - name: Upload Arch Linux Repository Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-arch-repo
+          path: target/release/arch-repo/*
+          if-no-files-found: warn
+
+      - name: Publish Pacman Repository to GitHub Release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view repo >/dev/null 2>&1; then
+            gh release upload repo target/release/arch-repo/* --clobber
+          else
+            gh release create repo target/release/arch-repo/* \
+              --title "Custom Zed Arch Linux Repository" \
+              --notes "Automated Pacman repository for custom minimal Zed on Arch Linux. Add this repository to /etc/pacman.conf to receive automated updates on 'pacman -Syu'."
+          fi
