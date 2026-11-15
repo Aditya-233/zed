@@ -7,7 +7,8 @@ use settings_macros::{MergeFrom, with_fallible_options};
 use std::sync::Arc;
 
 use crate::{
-    DelayMs, DocumentFoldingRanges, DocumentSymbols, ExtendingSet, SemanticTokens, merge_from,
+    DelayMs, DocumentFoldingRanges, DocumentSymbols, ExtendingSet, SemanticTokens, SplicingVec,
+    merge_from,
 };
 
 /// The state of the modifier keys at some point in time
