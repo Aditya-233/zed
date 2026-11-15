@@ -2249,7 +2249,7 @@ async fn test_file_scan_inclusions(cx: &mut TestAppContext) {
                 settings.project.worktree.file_scan_inclusions = Some(vec![
                     "node_modules/**/package.json".to_string(),
                     "**/.DS_Store".to_string(),
-                ]);
+                ].into());
             });
         });
     });
@@ -2301,7 +2301,7 @@ async fn test_file_scan_inclusions_from_project_settings(cx: &mut TestAppContext
                     "ignored/**/excluded.project".to_string(),
                 ]));
                 settings.project.worktree.file_scan_inclusions =
-                    Some(vec!["...".to_string(), "ignored/**/*.user".to_string()]);
+                    Some(vec!["...".to_string(), "ignored/**/*.user".to_string()].into());
             });
             store
                 .set_local_settings(
@@ -2496,7 +2496,7 @@ async fn test_file_scan_exclusions_overrules_inclusions(cx: &mut TestAppContext)
                 settings.project.worktree.file_scan_exclusions =
                     Some(SplicingVec::from(vec!["**/.DS_Store".to_string()]));
                 settings.project.worktree.file_scan_inclusions =
-                    Some(vec!["**/.DS_Store".to_string()]);
+                    Some(vec!["**/.DS_Store".to_string()].into());
             });
         });
     });
@@ -2559,7 +2559,7 @@ async fn test_file_scan_inclusions_reindexes_on_setting_change(cx: &mut TestAppC
             store.update_user_settings(cx, |settings| {
                 settings.project.worktree.file_scan_exclusions = Some(SplicingVec::from(vec![]));
                 settings.project.worktree.file_scan_inclusions =
-                    Some(vec!["node_modules/**".to_string()]);
+                    Some(vec!["node_modules/**".to_string()].into());
             });
         });
     });
@@ -2593,7 +2593,7 @@ async fn test_file_scan_inclusions_reindexes_on_setting_change(cx: &mut TestAppC
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |settings| {
                 settings.project.worktree.file_scan_exclusions = Some(SplicingVec::from(vec![]));
-                settings.project.worktree.file_scan_inclusions = Some(vec![]);
+                settings.project.worktree.file_scan_inclusions = Some(SplicingVec::from(vec![]));
             });
         });
     });
@@ -2915,7 +2915,7 @@ async fn test_hidden_files(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |settings| {
-                settings.project.worktree.hidden_files = Some(vec!["**/*.log".to_string()]);
+                settings.project.worktree.hidden_files = Some(vec!["**/*.log".to_string()].into());
             });
         });
     });
@@ -7312,7 +7312,7 @@ async fn test_file_scan_depth_pierced_by_inclusions(cx: &mut TestAppContext) {
             store.update_user_settings(cx, |settings| {
                 settings.project.worktree.file_scan_depth = Some(1);
                 settings.project.worktree.file_scan_inclusions =
-                    Some(vec!["junk/a/b/c/deep.txt".to_string()]);
+                    Some(vec!["junk/a/b/c/deep.txt".to_string()].into());
             });
         });
     });

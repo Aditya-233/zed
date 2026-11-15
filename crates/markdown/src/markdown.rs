@@ -4768,7 +4768,7 @@ impl MarkdownElementBuilder {
         self.rendered_lines.push(rendered_line.clone());
         self.append_child(
             RenderedLineElement {
-                text,
+                text: text.into_any(),
                 line: rendered_line,
             }
             .into_any_element(),
@@ -4793,7 +4793,7 @@ impl MarkdownElementBuilder {
 /// Wraps a rendered line so its code chips and highlights share the glyphs'
 /// ancestor content masks, and records the clipped bounds for platform text hit testing.
 struct RenderedLineElement {
-    text: StyledText,
+    text: AnyElement,
     line: Rc<RenderedLine>,
 }
 
@@ -4812,27 +4812,26 @@ impl Element for RenderedLineElement {
     fn request_layout(
         &mut self,
         _id: Option<&GlobalElementId>,
-        inspector_id: Option<&gpui::InspectorElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> (gpui::LayoutId, Self::RequestLayoutState) {
-        self.text.request_layout(None, inspector_id, window, cx)
+        (self.text.request_layout(window, cx), ())
     }
 
     fn prepaint(
         &mut self,
         _id: Option<&GlobalElementId>,
-        inspector_id: Option<&gpui::InspectorElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        request_layout: &mut Self::RequestLayoutState,
+        _request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
         self.line
             .visible_bounds
             .set(Some(bounds.intersect(&window.content_mask().bounds)));
-        self.text
-            .prepaint(None, inspector_id, bounds, request_layout, window, cx);
+        self.text.prepaint(window, cx);
     }
 
     fn paint(
@@ -4845,11 +4844,9 @@ impl Element for RenderedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let layout = self.text.layout();
         self.line.paint_code_chips(window);
-        layout.paint_background(window, cx).log_err();
+        self.text.paint(window, cx);
         self.line.paint_highlights(window);
-        layout.paint_foreground(window, cx).log_err();
     }
 }
 
