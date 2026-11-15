@@ -1297,7 +1297,7 @@ mod tests {
     fn test_yaml_frontmatter_closing_fence_at_eof() {
         for closing_fence in ["---", "...  "] {
             let source = format!("---\ntitle: Café\n{closing_fence}");
-            let parsed = parse_markdown_with_options(&source, false, false, true);
+            let parsed = parse_markdown_with_options(&source, false, false, true, false);
             let metadata = parsed.metadata_blocks.get(&0).expect("frontmatter");
             assert_eq!(&source[metadata.content_range.clone()], "title: Café\n");
         }

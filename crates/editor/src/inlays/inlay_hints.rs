@@ -1248,11 +1248,12 @@ pub mod tests {
     use crate::inlays::inlay_hints::InlayHintRefreshReason;
     use crate::scroll::Autoscroll;
     use crate::scroll::ScrollAmount;
+    use crate::test::editor_lsp_test_context::EditorLspTestContext;
     use crate::{Editor, SelectionEffects};
     use collections::HashSet;
     use futures::channel::oneshot;
     use futures::{StreamExt, future};
-    use gpui::{AppContext as _, Context, TestAppContext, WindowHandle};
+    use gpui::{AppContext as _, Context, TestAppContext, UpdateGlobal, WindowHandle};
     use itertools::Itertools as _;
     use language::language_settings::{ConfiguredLanguageServer, InlayHintKind, InlayHintSettings};
     use language::{Capability, FakeLspAdapter};
@@ -1264,7 +1265,9 @@ pub mod tests {
     use pretty_assertions::assert_eq;
     use project::{CodeAction, FakeFs, InlayId, InvalidationStrategy, LspAction, Project};
     use serde_json::json;
-    use settings::{AllLanguageSettingsContent, InlayHintSettingsContent, SettingsStore};
+    use settings::{
+        AllLanguageSettingsContent, InlayHintSettingsContent, SettingsContent, SettingsStore,
+    };
     use std::ops::Range;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};

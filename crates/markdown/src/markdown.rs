@@ -7212,7 +7212,7 @@ mod tests {
     #[test]
     fn test_collect_image_alt_text() {
         let alt_text = |markdown: &str| {
-            let events = parse_markdown_with_options(markdown, false, false, false).events;
+            let events = parse_markdown_with_options(markdown, false, false, false, false).events;
             let image_start = events
                 .iter()
                 .position(|(_, event)| {
