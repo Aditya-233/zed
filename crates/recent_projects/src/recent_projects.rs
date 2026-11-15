@@ -1963,6 +1963,7 @@ impl RecentProjectsDelegate {
                     multi_workspace
                         .read(cx)
                         .workspaces_for_project_group(key, cx)
+                        .into_iter()
                         .next()
                         .map(|workspace| workspace.read(cx).path_style(cx))
                 });
@@ -1971,7 +1972,7 @@ impl RecentProjectsDelegate {
             .or_else(|| {
                 self.workspaces
                     .iter()
-                    .find(|workspace| key.matches_identity(&workspace.project_group_key()))
+                    .find(|workspace| key.matches(&workspace.project_group_key()))
                     .and_then(|workspace| workspace.path_style)
             })
             .unwrap_or_else(PathStyle::local)

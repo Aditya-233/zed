@@ -324,6 +324,7 @@ impl TestAppContext {
     }
 
     /// Returns the TestPlatform
+    #[allow(dead_code)]
     pub(crate) fn test_platform(&self) -> &Rc<TestPlatform> {
         &self.test_platform
     }

@@ -693,7 +693,7 @@ impl TerminalView {
     }
 
     fn scroll_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        if event.modifiers.secondary(cx)
+        if event.modifiers.secondary()
             && matches!(self.mode, TerminalMode::Standalone)
             && EditorSettings::get_global(cx).mouse_wheel_zoom
         {
