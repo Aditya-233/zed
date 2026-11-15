@@ -3006,6 +3006,8 @@ mod tests {
             Some(window_bounds)
         );
     }
+
+    #[gpui::test]
     async fn test_workspace_id_stability() {
         zlog::init_test();
 

@@ -1570,7 +1570,6 @@ mod tests {
     use indoc::indoc;
     use markdown::parser::MarkdownEvent;
     use multi_buffer::MultiBuffer;
-    use parking_lot::Mutex;
     use project::InlayId;
     use settings::InlayHintSettingsContent;
     use settings::{DelayMs, SettingsStore};

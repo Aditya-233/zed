@@ -50117,37 +50117,6 @@ async fn test_lsp_show_document_unsupported_uri(cx: &mut TestAppContext) {
     assert_eq!(response, lsp::ShowDocumentResult { success: false });
 }
 
-async fn register_document_highlight_capability(
-    lsp: &lsp::FakeLanguageServer,
-    registration_id: &str,
-    language: &str,
-) {
-    lsp.request::<lsp::request::RegisterCapability>(
-        lsp::RegistrationParams {
-            registrations: vec![lsp::Registration {
-                id: registration_id.to_string(),
-                method: "textDocument/documentHighlight".to_string(),
-                register_options: Some(json!({
-                    "documentSelector": [{ "language": language, "scheme": "file" }],
-                })),
-            }],
-        },
-        DEFAULT_LSP_REQUEST_TIMEOUT,
-    )
-    .await
-    .into_response()
-    .unwrap();
-}
-
-fn document_highlight_count(cx: &mut EditorLspTestContext) -> usize {
-    cx.editor(|editor, _, _| {
-        editor
-            .background_highlights
-            .get(&HighlightKey::DocumentHighlightRead)
-            .map_or(0, |(_, ranges)| ranges.len())
-    })
-}
-
 #[track_caller]
 fn assert_add_selection_pair(
     editor: &mut Editor,

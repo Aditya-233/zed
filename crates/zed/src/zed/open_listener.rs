@@ -803,7 +803,7 @@ async fn open_local_workspace(
             && cx.update(|cx| {
                 let active_window = cx.active_window();
                 workspace::workspace_windows_for_location(&SerializedWorkspaceLocation::Local, cx)
-                    .iter()
+                    .into_iter()
                     .any(|window| Some(window.into()) == active_window)
             });
         if !add_to_active_window {

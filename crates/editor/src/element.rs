@@ -10949,10 +10949,7 @@ mod tests {
         display_map::{BlockPlacement, BlockProperties, DisplayMap},
         editor_tests::{init_test, update_test_language_settings},
     };
-    use gpui::{
-        EntityInputHandler, Render, TestAppContext, Underline, UpdateGlobal, VisualTestContext,
-        WindowHandle, font,
-    };
+    use gpui::{EntityInputHandler, TestAppContext, VisualTestContext, font};
     use language::{Buffer, SelectionGoal, language_settings, tree_sitter_python};
     use log::info;
     use rand::{RngCore, rngs::StdRng};
