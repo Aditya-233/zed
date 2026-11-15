@@ -4098,7 +4098,7 @@ mod tests {
         db.save_workspace(workspace.clone()).await;
 
         // Save window bounds separately (as the actual code does via set_window_open_status)
-        db.set_window_open_status(id, window_bounds, display_uuid)
+        db.set_window_open_status(id, window_bounds, display_uuid, None)
             .await
             .unwrap();
 

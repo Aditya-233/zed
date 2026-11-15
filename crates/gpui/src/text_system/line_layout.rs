@@ -1038,8 +1038,8 @@ mod tests {
         }];
 
         text_system.shape_line(text.clone(), px(14.), &runs, None);
-        let state = text_system.line_layout_cache.state.borrow();
-        let (key, _) = state.current_frame.lines.iter().next().unwrap();
+        let current_frame = text_system.line_layout_cache.current_frame.read();
+        let (key, _) = current_frame.lines.iter().next().unwrap();
         assert_eq!(key.text.as_ptr(), text.as_ptr());
     }
 

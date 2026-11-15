@@ -397,7 +397,7 @@ impl SecurityModal {
         match &self.home_dir {
             Some(home_dir) => path_style
                 .strip_prefix(path, home_dir)
-                .and_then(|stripped| path_style.join("~", stripped))
+                .and_then(|stripped| path_style.join("~", stripped.as_ref()))
                 .map(|joined| Cow::Owned(PathBuf::from(joined)))
                 .unwrap_or(Cow::Borrowed(path)),
             None => Cow::Borrowed(path),

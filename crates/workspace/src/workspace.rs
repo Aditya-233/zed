@@ -7593,6 +7593,7 @@ impl Workspace {
                     database_id,
                     SerializedWindowBounds(window_bounds),
                     display_uuid,
+                    None,
                 )
                 .await
                 .log_err();
@@ -7839,6 +7840,7 @@ impl Workspace {
                         database_id,
                         window_bounds,
                         display.unwrap_or_default(),
+                        None,
                     );
                     let session_id_write = db.set_session_id(database_id, None);
                     let (open_status, session_id) =
@@ -10965,14 +10967,16 @@ pub fn find_existing_workspace(
                             let abs_path = worktree.abs_path();
                             path_style
                                 .strip_prefix(path.as_ref(), abs_path.as_ref())
-                                .map(|rel| worktree.entry_for_path(&rel).is_some_and(|e| e.is_dir()))
+                                .map(|rel| {
+                                    worktree.entry_for_path(&rel).is_some_and(|e| e.is_dir())
+                                })
                         })
                         .any(|is_dir| is_dir)
                 })
             });
 
             if open_options.wait && existing.is_some() && all_paths_are_files {
-                existing = preferred_workspace_target(location, cx).or(existing);
+                existing = preferred_workspace_target(location, cx).or(existing.take());
                 open_visible = OpenVisible::None;
             }
         });

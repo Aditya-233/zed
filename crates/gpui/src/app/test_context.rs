@@ -323,6 +323,11 @@ impl TestAppContext {
         &self.text_system
     }
 
+    /// Returns the TestPlatform
+    pub fn test_platform(&self) -> &Rc<TestPlatform> {
+        &self.test_platform
+    }
+
     /// Simulates writing to the platform clipboard
     pub fn write_to_clipboard(&self, item: ClipboardItem) {
         self.test_platform.write_to_clipboard(item)

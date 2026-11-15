@@ -5665,14 +5665,16 @@ impl InputHandler for MarkdownInputHandler {
 mod tests {
     use super::*;
     use gpui::{
-        Modifiers, NoopTextSystem, RenderImage, ScrollDelta, ScrollWheelEvent, TestAppContext,
-        TouchPhase, UpdateGlobal, VisualTestContext, size,
+        Background, DevicePixels, Font, FontId, FontMetrics, FontRun, GlyphId, LineLayout,
+        Modifiers, NoopTextSystem, PlatformTextSystem, RenderGlyphParams, RenderImage, ScrollDelta,
+        ScrollWheelEvent, Size, TestAppContext, TestDispatcher, TextRenderingMode, TouchPhase,
+        UpdateGlobal, VisualTestContext, size,
     };
     use language::{Language, LanguageConfig, LanguageMatcher};
-    use parking_lot::Mutex;
+    use std::borrow::Cow;
     use std::cell::RefCell;
     use std::sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     };
 

@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn test_insert_after_sorting() {
-        let focus_map = Arc::new(RwLock::new(FocusMap::default()));
+        let focus_map = Arc::new(FocusMap::default());
         let mut tab_index_map = TabStopMap::default();
         let second = FocusHandle::new(&focus_map).tab_stop(true).tab_index(1);
         let first = FocusHandle::new(&focus_map).tab_stop(true).tab_index(0);

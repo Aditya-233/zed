@@ -1449,7 +1449,7 @@ mod tests {
                         let ElementId::NamedInteger(name, element_id) = global_id.last()? else {
                             return None;
                         };
-                        (name.as_ref() == "randomized-element").then_some(element_id)
+                        (name.as_ref() == "randomized-element").then_some(*element_id)
                     })
                     .collect(),
             }
