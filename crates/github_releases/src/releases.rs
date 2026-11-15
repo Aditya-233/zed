@@ -172,9 +172,7 @@ pub fn build_asset_url(repo_name_with_owner: &str, tag: &str, kind: AssetKind) -
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AssetKind, GITHUB_RELEASE_REQUEST_TIMEOUT, build_asset_url, github_api_request,
-    };
+    use super::{AssetKind, GITHUB_RELEASE_REQUEST_TIMEOUT, build_asset_url, github_api_request};
     use http_client::RequestTimeout;
 
     #[test]

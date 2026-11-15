@@ -336,11 +336,7 @@ impl WgpuRenderer {
                 context.check_compatible_with_surface(&surface)?;
                 context
             }
-            None => ctx_ref.insert(WgpuContext::new(
-                instance,
-                &surface,
-                compositor_gpu,
-            )?),
+            None => ctx_ref.insert(WgpuContext::new(instance, &surface, compositor_gpu)?),
         };
 
         let atlas = Arc::new(WgpuAtlas::from_context(context));
@@ -2199,11 +2195,8 @@ impl WgpuRenderer {
 
             let instance = WgpuContext::instance(Some(Box::new(window.clone())));
             let surface = create_surface(&instance, window_handle.as_raw())?;
-            let new_context = WgpuContext::new_rejecting_software(
-                instance,
-                &surface,
-                self.compositor_gpu,
-            )?;
+            let new_context =
+                WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?;
             *gpu_context.borrow_mut() = Some(new_context);
             surface
         } else {
