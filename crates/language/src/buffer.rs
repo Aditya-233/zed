@@ -22,10 +22,6 @@ use crate::{
     text_diff::text_diff,
     unified_diff_with_offsets,
 };
-pub use crate::{
-    CaptureId, Grammar, HighlightId, HighlightMap, Language, LanguageRegistry,
-    diagnostic_set::DiagnosticSet, proto,
-};
 
 use anyhow::{Context as _, Result};
 use clock::Lamport;
@@ -6146,7 +6142,6 @@ pub(crate) fn trailing_whitespace_ranges(
     ranges
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::{AutoindentMode, Buffer};
@@ -6192,4 +6187,3 @@ mod tests {
         }
     }
 }
-

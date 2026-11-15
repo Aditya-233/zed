@@ -9630,6 +9630,7 @@ mod tests {
             text.contains("Hidden body"),
             "details element should render body; got: {text:?}"
         );
+    }
 
     fn rust_test_theme() -> SyntaxTheme {
         SyntaxTheme::new(

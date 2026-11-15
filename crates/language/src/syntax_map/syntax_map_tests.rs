@@ -2063,7 +2063,6 @@ fn flattened(
         .collect()
 }
 
-
 fn range_for_text(buffer: &Buffer, text: &str) -> Range<usize> {
     let start = buffer.as_rope().to_string().find(text).unwrap();
     start..start + text.len()
