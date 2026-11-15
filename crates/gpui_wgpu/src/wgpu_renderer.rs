@@ -219,7 +219,6 @@ struct WgpuRendererCore {
     rendering_params: RenderingParameters,
     is_bgr: bool,
     dual_source_blending: bool,
-    transient_attachments: bool,
     adapter_info: wgpu::AdapterInfo,
     depth_texture: Option<DepthTexture>,
     /// Read by the headless renderer to create its render target.
@@ -340,7 +339,6 @@ impl WgpuRenderer {
             None => ctx_ref.insert(WgpuContext::new(
                 instance,
                 &surface,
-                &config,
                 compositor_gpu,
             )?),
         };
@@ -407,7 +405,7 @@ impl WgpuRenderer {
                 surface_caps
                     .formats
                     .iter()
-                    .find(|format| !format.has_srgb_suffix())
+                    .find(|format| !format.is_srgb())
                     .copied()
             })
             .or_else(|| surface_caps.formats.first().copied())
@@ -1161,7 +1159,7 @@ impl WgpuRenderer {
             return false;
         }
 
-        core.resources.queue.present(frame);
+        frame.present();
         true
     }
 }
@@ -1288,7 +1286,6 @@ impl WgpuRendererCore {
             rendering_params,
             is_bgr: false,
             dual_source_blending,
-            transient_attachments: context.supports_transient_attachments(),
             adapter_info: context.adapter.get_info(),
             depth_texture: None,
             #[cfg(all(
@@ -1562,11 +1559,7 @@ impl WgpuRendererCore {
         {
             return;
         }
-        let usage = if self.transient_attachments {
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TRANSIENT_ATTACHMENT
-        } else {
-            wgpu::TextureUsages::RENDER_ATTACHMENT
-        };
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
         let texture = self
             .resources()
             .device
@@ -2209,7 +2202,6 @@ impl WgpuRenderer {
             let new_context = WgpuContext::new_rejecting_software(
                 instance,
                 &surface,
-                &config,
                 self.compositor_gpu,
             )?;
             *gpu_context.borrow_mut() = Some(new_context);
@@ -2462,7 +2454,7 @@ impl WgpuHeadlessRenderer {
             .map_err(|error| anyhow::anyhow!("Failed to map headless readback buffer: {error}"))?;
         self.check_gpu_errors()?;
 
-        let mapped_data = readback_buffer.slice(..).get_mapped_range()?;
+        let mapped_data = readback_buffer.slice(..).get_mapped_range();
         let pixel_capacity = usize::try_from(u64::from(bytes_per_row) * u64::from(height))
             .map_err(|_| anyhow::anyhow!("Headless image size exceeds addressable memory"))?;
         let mut pixels = Vec::with_capacity(pixel_capacity);

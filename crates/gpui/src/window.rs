@@ -6760,6 +6760,11 @@ impl Window {
         self.platform_window.play_system_bell()
     }
 
+    /// Returns whether accessibility support is enabled for this window.
+    pub fn is_a11y_enabled(&self) -> bool {
+        self.a11y.is_enabled()
+    }
+
     /// Returns whether accessibility features are active for this frame,
     /// i.e. whether assistive technology (such as a screen reader) is
     /// connected and an accessibility tree is being built.

@@ -38,7 +38,7 @@ use collections::{HashMap, HashSet};
 use futures::Future;
 use futures::future::LocalBoxFuture;
 use futures::lock::OwnedMutexGuard;
-use gpui::{App, AsyncApp, BackgroundExecutor, Entity, EntityId, SharedString};
+use gpui::{App, AsyncApp, BackgroundExecutor, Entity, EntityId};
 use http_client::HttpClient;
 
 pub use language_core::{
@@ -1178,7 +1178,9 @@ impl Language {
         text: &Rope,
     ) -> ResolvedHighlights {
         let highlight_map = grammar.highlight_map();
-        let tree = parse_text(grammar, text, None);
+        let Ok(tree) = parse_text(grammar, text, None) else {
+            return ResolvedHighlights::default();
+        };
         let captures =
             SyntaxSnapshot::single_tree_captures(0..text.len(), text, &tree, self, |grammar| {
                 grammar

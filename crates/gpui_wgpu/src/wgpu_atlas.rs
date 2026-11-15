@@ -528,7 +528,9 @@ mod tests {
 
     #[test]
     fn reused_texture_id_has_new_generation() -> anyhow::Result<()> {
-        let (device, queue) = test_device_and_queue()?;
+        let Some((device, queue)) = test_device_and_queue()? else {
+            return Ok(());
+        };
         let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
         let size = Size {
             width: DevicePixels(700),

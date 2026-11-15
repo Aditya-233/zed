@@ -193,6 +193,11 @@ impl TestAppContext {
         Ok(())
     }
 
+    /// Disables accessibility for subsequently created test windows.
+    pub fn disable_accessibility(&mut self) {
+        self.update(|cx| cx.accessibility_force_disabled = true);
+    }
+
     /// Returns an executor (for running tasks in the background)
     pub fn executor(&self) -> BackgroundExecutor {
         self.background_executor.clone()

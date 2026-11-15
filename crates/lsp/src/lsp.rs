@@ -2160,7 +2160,12 @@ impl FakeLanguageServer {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
-    use std::str::FromStr;
+    use std::{
+        io,
+        pin::Pin,
+        str::FromStr,
+        task::{Context, Poll},
+    };
 
     #[ctor::ctor(unsafe)]
     fn init_logger() {
@@ -2632,5 +2637,80 @@ mod tests {
             name: "my project".to_string(),
         }];
         assert_eq!(workspace_folders, expected_workspace_folders);
+    }
+
+    struct ShutdownTestOutput {
+        bytes: Vec<u8>,
+        remaining_flushes: Option<usize>,
+        blocked: bool,
+    }
+
+    struct ShutdownTestWriter(Arc<Mutex<ShutdownTestOutput>>);
+
+    impl AsyncWrite for ShutdownTestWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            let mut output = self.0.lock();
+            if output.remaining_flushes == Some(0) {
+                output.blocked = true;
+                return Poll::Pending;
+            }
+            output.bytes.extend_from_slice(bytes);
+            Poll::Ready(Ok(bytes.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            if let Some(remaining_flushes) = &mut self.0.lock().remaining_flushes {
+                *remaining_flushes = remaining_flushes.saturating_sub(1);
+            }
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn shutdown_test_server(
+        remaining_flushes: Option<usize>,
+        cx: &mut TestAppContext,
+    ) -> (
+        LanguageServer,
+        async_pipe::PipeWriter,
+        Arc<Mutex<ShutdownTestOutput>>,
+    ) {
+        let (stdout_writer, stdout_reader) = async_pipe::pipe();
+        let output = Arc::new(Mutex::new(ShutdownTestOutput {
+            bytes: Vec::new(),
+            remaining_flushes,
+            blocked: false,
+        }));
+        let server = LanguageServer::new_internal(
+            LanguageServerId(0),
+            LanguageServerName::from("shutdown-test"),
+            ShutdownTestWriter(output.clone()),
+            stdout_reader,
+            None::<async_pipe::PipeReader>,
+            Arc::new(Mutex::new(None)),
+            None,
+            None,
+            LanguageServerBinary {
+                path: PathBuf::from("shutdown-test"),
+                arguments: Vec::new(),
+                env: None,
+            },
+            FakeLanguageServer::root_path(),
+            None,
+            &mut cx.to_async(),
+            |_| false,
+        );
+        (server, stdout_writer, output)
+    }
+
+    fn framed_test_message(payload: &str) -> Vec<u8> {
+        format!("Content-Length: {}\r\n\r\n{payload}", payload.len()).into_bytes()
     }
 }
