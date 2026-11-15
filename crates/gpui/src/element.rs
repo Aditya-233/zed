@@ -31,13 +31,13 @@
 //! elements when you need to take manual control of the layout and painting process, such as when using
 //! your own custom layout algorithm or rendering a code editor.
 
+#[cfg(any(feature = "inspector", debug_assertions))]
+use crate::InspectorElementPath;
 use crate::{
     A11ySubtreeBuilder, App, ArenaBox, AvailableSpace, Bounds, Context, DispatchNodeId, ElementId,
     FocusHandle, InspectorElementId, LayoutId, Pixels, Point, Size, Style, Window,
     util::FluentBuilder, window::with_element_arena,
 };
-#[cfg(any(feature = "inspector", debug_assertions))]
-use crate::InspectorElementPath;
 use std::{
     any::Any,
     fmt::{self, Debug, Display},
