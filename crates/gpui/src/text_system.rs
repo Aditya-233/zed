@@ -1237,9 +1237,7 @@ mod line_wrapper_pool_tests {
 
         let mut wrapper = text_system.line_wrapper(font(".ZedMono"), px(16.));
         let fragments = [LineFragment::text("hello world")];
-        wrapper
-            .wrap_line(&fragments, px(40.))
-            .for_each(drop);
+        wrapper.wrap_line(&fragments, px(40.)).for_each(drop);
         drop(wrapper);
         drop(text_system);
 
