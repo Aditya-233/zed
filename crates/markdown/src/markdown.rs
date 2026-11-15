@@ -8460,7 +8460,6 @@ mod tests {
         assert!(visible_bounds.right() <= window_width);
     }
 
-
     #[gpui::test]
     fn test_search_and_selection_below_aligned_inline_code(cx: &mut TestAppContext) {
         ensure_theme_initialized(cx);

@@ -298,7 +298,10 @@ pub(crate) fn parse_markdown_with_options(
     }
     let mut open_lists: Vec<OpenList> = Vec::new();
     let mut frontmatter = Vec::new();
-    if !strict_commonmark && parse_metadata_blocks && let Some(candidate) = yaml_frontmatter_candidate(text) {
+    if !strict_commonmark
+        && parse_metadata_blocks
+        && let Some(candidate) = yaml_frontmatter_candidate(text)
+    {
         let mut parser = Parser::new_ext(
             candidate,
             PARSE_OPTIONS.union(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS),
