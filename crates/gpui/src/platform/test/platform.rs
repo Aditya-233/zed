@@ -1,7 +1,3 @@
-#[cfg(any(test, feature = "test-support"))]
-use crate::NoopTextSystem;
-#[cfg(any(test, feature = "test-support"))]
-use crate::PathPromptOptions;
 use crate::{
     AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DevicePixels,
     DummyKeyboardMapper, ForegroundExecutor, Keymap, Platform, PlatformDisplay,
@@ -10,6 +6,8 @@ use crate::{
     SourceMetadata, SystemNotification, SystemNotificationResponse, Task, TestDisplay, TestWindow,
     ThermalState, WindowAppearance, WindowParams, size,
 };
+#[cfg(any(test, feature = "test-support"))]
+use crate::{NoopTextSystem, PathPromptOptions};
 use anyhow::Result;
 #[cfg(any(test, feature = "test-support"))]
 use collections::VecDeque;
@@ -112,6 +110,11 @@ pub(crate) struct TestPrompts {
 }
 
 impl TestPlatform {
+    #[cfg(test)]
+    pub(crate) fn cursor_style(&self) -> CursorStyle {
+        *self.active_cursor.lock()
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub fn new(executor: BackgroundExecutor, foreground_executor: ForegroundExecutor) -> Rc<Self> {
         Self::with_platform(

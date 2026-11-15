@@ -32,6 +32,7 @@ mod interactive;
 mod key_dispatch;
 mod keymap;
 mod path_builder;
+mod path_winding;
 mod platform;
 pub mod prelude;
 /// Profiling utilities for task, frame, and thread performance tracking.
@@ -46,6 +47,9 @@ pub mod profiler;
 ))]
 #[expect(missing_docs)]
 pub mod queue;
+/// A seeded, mutable element tree for benchmarks and tests of GPUI rendering.
+#[cfg(any(test, feature = "bench-support"))]
+pub mod randomized_element_tree;
 mod scene;
 mod shared_uri;
 mod spring;
@@ -142,6 +146,7 @@ pub use interactive::*;
 use key_dispatch::*;
 pub use keymap::*;
 pub use path_builder::*;
+pub(crate) use path_winding::*;
 pub use platform::*;
 pub use profiler::*;
 #[cfg(any(target_os = "windows", target_os = "linux", target_family = "wasm"))]

@@ -126,6 +126,45 @@ pub struct InputTiming {
     pub caused_invalidation: bool,
 }
 
+/// A frame callback entering the foreground, without implying foreground work.
+#[derive(Debug, Copy, Clone)]
+pub struct PlatformSignal {
+    /// The window receiving the callback.
+    pub window_id: WindowId,
+    /// When the platform requested the callback, if its clock is supported.
+    pub signal_at: Option<Instant>,
+    /// When foreground handling began.
+    pub handled_at: Instant,
+    /// Whether the callback came from the platform or local scheduling.
+    pub source: crate::FrameRequestSource,
+}
+
+/// Why a completed frame request did not draw a new frame.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FrameSkipReason {
+    /// The callback completed without needing a new render.
+    NoRenderNeeded,
+    /// An inactive window deferred drawing.
+    InactiveFrameRateLimit,
+    /// Thermal throttling deferred drawing.
+    ThermalFrameRateLimit,
+    /// Low power mode deferred drawing.
+    LowPowerFrameRateLimit,
+    /// A scene animation's frame rate cap deferred presenting.
+    AnimationFrameRateLimit,
+}
+
+/// A completed frame request that returned without drawing a new frame.
+#[derive(Debug, Copy, Clone)]
+pub struct FrameSkipped {
+    /// The window whose callback returned.
+    pub window_id: WindowId,
+    /// When the foreground completed this callback.
+    pub at: Instant,
+    /// Why no new frame was drawn.
+    pub reason: FrameSkipReason,
+}
+
 /// Exact count and total duration of task polls below [`TASK_POLL_FLOOR`].
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub struct PollSummary {

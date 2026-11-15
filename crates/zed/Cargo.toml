@@ -104,6 +104,7 @@ profiling.workspace = true
 project.workspace = true
 project_panel.workspace = true
 project_symbols.workspace = true
+project_bookmarks.workspace = true
 proto.workspace = true
 recent_projects.workspace = true
 release_channel.workspace = true

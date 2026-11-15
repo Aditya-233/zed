@@ -7,7 +7,7 @@ use crate::{
     searchable::SearchableItemHandle,
     workspace_settings::{AutosaveSetting, WorkspaceSettings},
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use client::{Client, proto};
 use futures::channel::mpsc;
 use gpui::{
@@ -15,8 +15,8 @@ use gpui::{
     EventEmitter, FocusHandle, Focusable, Font, Pixels, Point, Render, SharedString, Task, TaskExt,
     WeakEntity, Window,
 };
-use language::Capability;
 pub use language::HighlightedText;
+use language::{Buffer, Capability};
 use project::{Project, ProjectEntryId, ProjectPath};
 pub use settings::{
     ActivateOnClose, ClosePosition, RegisterSetting, Settings, SettingsLocation, ShowCloseButton,
@@ -283,7 +283,9 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         Capability::ReadWrite
     }
 
-    fn toggle_read_only(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+    fn read_only_toggle_buffer(&self, _: &App) -> Option<Entity<Buffer>> {
+        None
+    }
 
     fn has_deleted_file(&self, _: &App) -> bool {
         false
@@ -315,6 +317,14 @@ pub trait Item: Focusable + EventEmitter<Self::Event> + Render + Sized {
         _cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
         unimplemented!("save_as() must be implemented if can_save() returns true")
+    }
+    fn save_elevated(
+        &mut self,
+        _project: Entity<Project>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        Task::ready(Err(anyhow!("save_elevated is not supported for this item")))
     }
     fn reload(
         &mut self,
@@ -527,6 +537,7 @@ pub trait ItemHandle: 'static + Send {
     fn to_any_view(&self) -> AnyView;
     fn is_dirty(&self, cx: &App) -> bool;
     fn capability(&self, cx: &App) -> Capability;
+    fn read_only_toggle_buffer(&self, cx: &App) -> Option<Entity<Buffer>>;
     fn toggle_read_only(&self, window: &mut Window, cx: &mut App);
     fn has_deleted_file(&self, cx: &App) -> bool;
     fn has_conflict(&self, cx: &App) -> bool;
@@ -543,6 +554,12 @@ pub trait ItemHandle: 'static + Send {
         &self,
         project: Entity<Project>,
         path: ProjectPath,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<()>>;
+    fn save_elevated(
+        &self,
+        project: Entity<Project>,
         window: &mut Window,
         cx: &mut App,
     ) -> Task<Result<()>>;
@@ -1043,10 +1060,25 @@ impl<T: Item> ItemHandle for Entity<T> {
         self.read(cx).capability(cx)
     }
 
+    fn read_only_toggle_buffer(&self, cx: &App) -> Option<Entity<Buffer>> {
+        self.read(cx).read_only_toggle_buffer(cx)
+    }
+
     fn toggle_read_only(&self, window: &mut Window, cx: &mut App) {
-        self.update(cx, |this, cx| {
-            this.toggle_read_only(window, cx);
-        })
+        let Some(buffer) = self.read_only_toggle_buffer(cx) else {
+            return;
+        };
+        buffer.update(cx, |buffer, cx| {
+            buffer.set_capability(
+                match buffer.capability() {
+                    Capability::ReadWrite => Capability::Read,
+                    Capability::Read => Capability::ReadWrite,
+                    Capability::ReadOnly => Capability::ReadOnly,
+                },
+                cx,
+            );
+        });
+        window.refresh();
     }
 
     fn has_deleted_file(&self, cx: &App) -> bool {
@@ -1083,6 +1115,15 @@ impl<T: Item> ItemHandle for Entity<T> {
         cx: &mut App,
     ) -> Task<anyhow::Result<()>> {
         self.update(cx, |item, cx| item.save_as(project, path, window, cx))
+    }
+
+    fn save_elevated(
+        &self,
+        project: Entity<Project>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<()>> {
+        self.update(cx, |item, cx| item.save_elevated(project, window, cx))
     }
 
     fn reload(
