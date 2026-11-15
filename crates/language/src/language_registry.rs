@@ -23,13 +23,13 @@ use gpui::{App, BackgroundExecutor, EntityId, Subscription};
 use lsp::LanguageServerId;
 use parking_lot::{Mutex, RwLock};
 use postage::watch;
+use smallvec::SmallVec;
 
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use smallvec::SmallVec;
 use text::Rope;
 use theme::Theme;
 
