@@ -33,9 +33,11 @@
 
 use crate::{
     A11ySubtreeBuilder, App, ArenaBox, AvailableSpace, Bounds, Context, DispatchNodeId, ElementId,
-    FocusHandle, InspectorElementId, InspectorElementPath, LayoutId, Pixels, Point, Size, Style,
-    Window, util::FluentBuilder, window::with_element_arena,
+    FocusHandle, InspectorElementId, LayoutId, Pixels, Point, Size, Style, Window,
+    util::FluentBuilder, window::with_element_arena,
 };
+#[cfg(any(feature = "inspector", debug_assertions))]
+use crate::InspectorElementPath;
 use std::{
     any::Any,
     fmt::{self, Debug, Display},
