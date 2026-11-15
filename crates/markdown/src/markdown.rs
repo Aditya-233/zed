@@ -5665,10 +5665,11 @@ impl InputHandler for MarkdownInputHandler {
 mod tests {
     use super::*;
     use gpui::{
-        Modifiers, RenderImage, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
-        UpdateGlobal, VisualTestContext, size,
+        Modifiers, NoopTextSystem, RenderImage, ScrollDelta, ScrollWheelEvent, TestAppContext,
+        TouchPhase, UpdateGlobal, VisualTestContext, size,
     };
     use language::{Language, LanguageConfig, LanguageMatcher};
+    use parking_lot::Mutex;
     use std::cell::RefCell;
     use std::sync::{
         Arc,
@@ -9311,14 +9312,6 @@ mod tests {
 
     fn nbsp(n: usize) -> String {
         "\u{00A0}".repeat(n)
-    }
-
-    fn has_code_block(markdown: &str) -> bool {
-        let parsed_data = parse_markdown_with_options(markdown, false, false, false);
-        parsed_data
-            .events
-            .iter()
-            .any(|(_, event)| matches!(event, MarkdownEvent::Start(MarkdownTag::CodeBlock { .. })))
     }
 
     fn failing_image_source() -> ImageSource {

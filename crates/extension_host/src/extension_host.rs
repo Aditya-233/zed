@@ -1340,21 +1340,7 @@ impl ExtensionStore {
         self.proxy.remove_user_themes(themes_to_remove);
         self.proxy.remove_icon_themes(icon_themes_to_remove);
         self.proxy
-            .remove_languages(&languages_to_remove, &grammars_to_remove);
-
-        // Remove semantic token rules for languages being unloaded.
-        let semantic_token_rules_to_remove = languages_to_remove
-            .iter()
-            .filter(|language| !self.proxy.is_language_registered(language))
-            .chain(languages_to_readd.iter().map(|(name, _)| name))
-            .collect::<Vec<_>>();
-        if !semantic_token_rules_to_remove.is_empty() {
-            SettingsStore::update_global(cx, |store, _| {
-                for language in semantic_token_rules_to_remove {
-                    store.remove_language_semantic_token_rules(language.as_ref());
-                }
-            });
-        }
+            .update_languages(&[], &grammars_to_remove, Vec::new());
 
         let mut grammars_to_add = Vec::new();
         let mut themes_to_add = Vec::new();
@@ -1497,9 +1483,9 @@ impl ExtensionStore {
             )
             .peekable();
         if semantic_token_rules_to_remove.peek().is_some() {
-            SettingsStore::update_global(cx, |store, cx| {
+            SettingsStore::update_global(cx, |store, _| {
                 for language in semantic_token_rules_to_remove {
-                    store.remove_language_semantic_token_rules(language.as_ref(), cx);
+                    store.remove_language_semantic_token_rules(language.as_ref());
                 }
             });
         }

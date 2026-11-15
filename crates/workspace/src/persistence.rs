@@ -2146,15 +2146,24 @@ impl WorkspaceDb {
     }
 
     query! {
-        pub(crate) async fn set_window_open_status(workspace_id: WorkspaceId, bounds: SerializedWindowBounds, display: Uuid) -> Result<()> {
+        pub(crate) async fn set_window_open_status(workspace_id: WorkspaceId, bounds: SerializedWindowBounds, display: Uuid, native_window_state: Option<Vec<u8>>) -> Result<()> {
             UPDATE workspaces
             SET window_state = ?2,
                 window_x = ?3,
                 window_y = ?4,
                 window_width = ?5,
                 window_height = ?6,
-                display = ?7
+                display = ?7,
+                native_window_state = ?8
             WHERE workspace_id = ?1
+        }
+    }
+
+    query! {
+        pub(crate) fn native_window_state(workspace_id: WorkspaceId) -> Result<Option<(Option<Uuid>, Option<Vec<u8>>)>> {
+            SELECT display, native_window_state
+            FROM workspaces
+            WHERE workspace_id = ?
         }
     }
 
@@ -2392,7 +2401,6 @@ impl RecentWorkspace {
     pub fn effective_path_style(&self) -> PathStyle {
         match &self.location {
             SerializedWorkspaceLocation::Local => PathStyle::local(),
-            SerializedWorkspaceLocation::Remote(_) => self.path_style.unwrap_or(PathStyle::local()),
         }
     }
 }
@@ -3204,22 +3212,10 @@ mod tests {
         fs.insert_tree("/path-style/remote", json!({})).await;
 
         let local_paths = [Path::new("/path-style/local")];
-        let remote_paths = [Path::new("/path-style/remote")];
 
         let mut local_workspace = workspace_with(1, &local_paths, empty_pane_group(), None);
         local_workspace.path_style = non_local_path_style();
         db.save_workspace(local_workspace.clone()).await;
-
-        let remote_connection_id = db
-            .get_or_create_remote_connection(RemoteConnectionOptions::Ssh(SshConnectionOptions {
-                host: "path-style-host".into(),
-                ..Default::default()
-            }))
-            .await
-            .unwrap();
-        let mut remote_workspace = remote_workspace_with(2, "path-style-host", &remote_paths);
-        remote_workspace.path_style = non_local_path_style();
-        db.save_workspace(remote_workspace).await;
 
         assert_eq!(
             db.workspace_for_id(WorkspaceId(1)).unwrap().path_style,
@@ -3228,12 +3224,6 @@ mod tests {
         assert_eq!(
             db.workspace_for_roots(&local_paths).unwrap().path_style,
             local_workspace.path_style
-        );
-        assert_eq!(
-            db.remote_workspace_for_roots(&remote_paths, remote_connection_id)
-                .unwrap()
-                .path_style,
-            non_local_path_style()
         );
 
         let recent_workspaces = db.recent_project_workspaces(fs.as_ref()).await.unwrap();

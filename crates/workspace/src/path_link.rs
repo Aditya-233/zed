@@ -533,8 +533,11 @@ fn project_paths_to_check(
         })
         .chain(potential_paths.iter().filter_map(|path_to_check| {
             let maybe_path = &path_to_check.path;
-            (maybe_path.starts_with("~") || path_style.is_absolute(maybe_path))
-                .then(|| path_to_check.clone())
+            (maybe_path.starts_with("~")
+                || maybe_path
+                    .to_str()
+                    .is_some_and(|s| path_style.is_absolute(s)))
+            .then(|| path_to_check.clone())
         }))
         .collect()
 }
@@ -544,7 +547,11 @@ fn normalize_absolute_candidate(
     path_to_check: &PathWithPosition,
     path_style: PathStyle,
 ) -> Option<PathWithPosition> {
-    (!path_style.is_absolute(&path_to_check.path)).then(|| {
+    (!path_to_check
+        .path
+        .to_str()
+        .is_some_and(|s| path_style.is_absolute(s)))
+    .then(|| {
         normalize_lexically(&cwd.join(&path_to_check.path))
             .ok()
             .map(|path| PathWithPosition {
