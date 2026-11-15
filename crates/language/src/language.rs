@@ -1211,10 +1211,6 @@ impl Language {
             runs: runs.into(),
         }
     }
-            }
-        }
-        result
-    }
 
     pub fn path_suffixes(&self) -> &[String] {
         &self.config.matcher.path_suffixes

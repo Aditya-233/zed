@@ -8876,7 +8876,6 @@ impl LspStore {
                 })
                 .await
             })
-            })
         }
     }
 

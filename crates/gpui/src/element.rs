@@ -33,8 +33,8 @@
 
 use crate::{
     A11ySubtreeBuilder, App, ArenaBox, AvailableSpace, Bounds, Context, DispatchNodeId, ElementId,
-    FocusHandle, InspectorElementId, LayoutId, Pixels, Point, Size, Style, Window,
-    util::FluentBuilder, window::with_element_arena,
+    FocusHandle, InspectorElementId, InspectorElementPath, LayoutId, Pixels, Point, Size, Style,
+    Window, util::FluentBuilder, window::with_element_arena,
 };
 use std::{
     any::Any,
@@ -357,21 +357,18 @@ impl<E: Element> Drawable<E> {
     fn request_layout(&mut self, window: &mut Window, cx: &mut App) -> LayoutId {
         match mem::take(&mut self.phase) {
             ElementDrawPhase::Start => {
-                let global_id = self.element.id().map(|element_id| {
-                    window.element_id_stack.push(element_id);
-                    GlobalElementId(Arc::from(&*window.element_id_stack))
-                });
+                let global_id = self
+                    .element
+                    .id()
+                    .map(|element_id| prepare_element_id(element_id, window));
 
                 let inspector_id;
                 #[cfg(any(feature = "inspector", debug_assertions))]
                 {
-                    inspector_id = self.element.source_location().map(|source| {
-                        let path = crate::InspectorElementPath {
-                            global_id: GlobalElementId(Arc::from(&*window.element_id_stack)),
-                            source_location: source,
-                        };
-                        window.build_inspector_element_id(path)
-                    });
+                    inspector_id = self
+                        .element
+                        .source_location()
+                        .map(|source| prepare_inspector_id(source, window));
                 }
                 #[cfg(not(any(feature = "inspector", debug_assertions)))]
                 {

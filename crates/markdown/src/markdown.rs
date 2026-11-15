@@ -2802,25 +2802,6 @@ impl Element for MarkdownElement {
             let markdown = self.markdown.read(cx);
             (
                 markdown.parsed_markdown.clone(),
-                markdown.images.clone(),
-                markdown.active_root_block,
-                markdown.options.render_mermaid_diagrams,
-                markdown.mermaid_state.clone(),
-                markdown.options.render_math,
-                markdown.math_state.clone(),
-                markdown.options.parse_html,
-            )
-        };
-        let mut builder = MarkdownElementBuilder::new(
-            &self.style.container_style,
-            self.style.base_text_style.clone(),
-            self.style.syntax.clone(),
-            highlights,
-            parsed_markdown.code_block_highlights.clone(),
-        );
-            let markdown = self.markdown.read(cx);
-            (
-                markdown.parsed_markdown.clone(),
                 markdown.images_by_source_offset.clone(),
                 markdown.active_root_block,
                 markdown.options.render_mermaid_diagrams,
