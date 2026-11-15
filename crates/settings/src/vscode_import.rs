@@ -668,13 +668,13 @@ impl VsCodeSettings {
             .as_array()?;
 
         skip_default(EditPredictionSettingsContent {
-            disabled_globs: skip_default(
+            disabled_globs: skip_default(SplicingVec::from(
                 disabled_globs
                     .iter()
                     .filter_map(|glob| glob.as_str())
                     .map(|s| s.to_string())
-                    .collect(),
-            ),
+                    .collect::<Vec<_>>(),
+            )),
             ..Default::default()
         })
     }
@@ -1128,7 +1128,8 @@ impl VsCodeSettings {
                         .filter_map(|n| n.as_str().map(str::to_owned))
                         .collect::<Vec<_>>()
                 })
-                .filter(|r| !r.is_empty()),
+                .filter(|r| !r.is_empty())
+                .map(SplicingVec::from),
             scan_symlinks: None,
             private_files: None,
             hidden_files: None,

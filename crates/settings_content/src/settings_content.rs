@@ -1524,6 +1524,12 @@ impl From<Vec<String>> for SplicingVec {
     }
 }
 
+impl FromIterator<String> for SplicingVec {
+    fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
+        SplicingVec(iter.into_iter().collect())
+    }
+}
+
 impl merge_from::MergeFrom for SplicingVec {
     fn merge_from(&mut self, other: &Self) {
         let inherited = std::mem::take(&mut self.0);
