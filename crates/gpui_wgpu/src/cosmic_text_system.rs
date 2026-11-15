@@ -349,10 +349,17 @@ impl CosmicTextSystemState {
                 "Segoe Fluent Icons",
             ];
 
+            // This only decides whether a face can be a primary font. The
+            // editor measures layout with the width of 'm' and would panic
+            // without it.
+            //
+            // Don't remove the face from the font database. Arabic, Devanagari
+            // and emoji fonts often have no Latin glyphs, and they are exactly
+            // what cosmic-text falls back to when the primary font lacks a
+            // glyph.
             if font.as_swash().charmap().map('m') == 0
                 && !allowed_bad_font_names.contains(&postscript_name.as_str())
             {
-                self.font_system.db_mut().remove_face(font.id());
                 continue;
             };
 
@@ -727,7 +734,10 @@ impl CosmicTextSystemState {
 
             let shaped_glyph = ShapedGlyph {
                 id: GlyphId(glyph.glyph_id as u32),
-                position: point(glyph.x.into(), glyph.y.into()),
+                position: point(
+                    (glyph.x + glyph.x_offset * f32::from(font_size)).into(),
+                    (glyph.y - glyph.y_offset * f32::from(font_size)).into(),
+                ),
                 index: glyph.start,
                 is_emoji,
             };
@@ -1084,6 +1094,29 @@ mod tests {
         Ok(text_system.layout_line(text, gpui::px(14.0), &runs))
     }
 
+    #[test]
+    fn combining_marks_are_positioned_over_their_base() -> Result<()> {
+        let text_system = text_system()?;
+        let layout = layout_text(&text_system, "v\u{0304}v")?;
+        let glyphs = layout
+            .runs
+            .iter()
+            .flat_map(|run| run.glyphs.iter())
+            .collect::<Vec<_>>();
+        assert_eq!(glyphs.len(), 3);
+        let base = glyphs[0].position;
+        let mark = glyphs[1].position;
+        let next = glyphs[2].position;
+        assert!(mark.x > base.x);
+        assert!(
+            mark.x < next.x,
+            "combining mark positioned after its base: mark.x={:?}, next.x={:?}",
+            mark.x,
+            next.x
+        );
+        Ok(())
+    }
+
     /// Mirrors the original crash: mixed-direction text reaching the shaper
     /// through `shape_text`, which only splits lines on `\n`.
     #[test]
@@ -1219,6 +1252,50 @@ mod tests {
             assert!(layout.width > Pixels::ZERO, "{text:?}");
         }
 
+        Ok(())
+    }
+
+    /// cosmic-text sums word widths to get a line's width but accumulates glyph
+    /// advances to position glyphs, so a trailing zero-advance glyph (here a
+    /// zero-width space) can land a few ulps past the width. When that glyph is a
+    /// wrap boundary, the row before it extends past the line's width, and hit
+    /// testing in that sliver used to panic (ZED-BW8, ZED-75K, ZED-81Z).
+    #[test]
+    fn index_for_position_past_line_width() -> Result<()> {
+        let text_system = Arc::new(gpui::TextSystem::new(Arc::new(text_system()?)));
+        let window_text_system = gpui::WindowTextSystem::new(text_system);
+        let text: SharedString = "Warning: this will delete files\u{200b}".into();
+        let runs = [gpui::TextRun {
+            len: text.len(),
+            font: gpui::font("IBM Plex Sans"),
+            ..Default::default()
+        }];
+        let lines =
+            window_text_system.shape_text(text, gpui::px(14.), &runs, Some(gpui::px(4.)), None)?;
+        let line = &lines[0];
+        let width = line.unwrapped_layout.width;
+        let boundary_glyph = |row: usize| {
+            let boundary = line.wrap_boundaries()[row];
+            &line.runs()[boundary.run_ix].glyphs[boundary.glyph_ix]
+        };
+        let row = (1..line.wrap_boundaries().len())
+            .find(|row| boundary_glyph(*row).position.x > width)
+            .expect("trailing zero-width space should be a wrap boundary past the line width");
+        let row_start_x = f32::from(boundary_glyph(row - 1).position.x);
+        let row_end = boundary_glyph(row);
+
+        let mut x = f32::from(width) - row_start_x;
+        while x + row_start_x < f32::from(width) {
+            x = x.next_up();
+        }
+        assert!(gpui::px(x + row_start_x) < row_end.position.x);
+
+        let line_height = gpui::px(20.);
+        let position = gpui::point(gpui::px(x), line_height * row as f32 + gpui::px(1.));
+        assert_eq!(
+            line.index_for_position(position, line_height),
+            Err(row_end.index)
+        );
         Ok(())
     }
 
