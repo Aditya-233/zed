@@ -928,6 +928,7 @@ impl settings::Settings for AllLanguageSettings {
             .disabled_globs
             .as_ref()
             .unwrap()
+            .0
             .iter()
             .collect();
 

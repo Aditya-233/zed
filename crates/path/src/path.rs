@@ -70,16 +70,19 @@ impl PathStyle {
     }
 
     pub fn is_absolute(&self, path_like: &str) -> bool {
-        path_like.starts_with('/')
-            || *self == PathStyle::Windows
-                && (path_like.starts_with('\\')
-                    || path_like
+        match self {
+            PathStyle::Unix => path_like.starts_with('/'),
+            PathStyle::Windows => {
+                path_like.starts_with('\\')
+                    || (path_like
                         .chars()
                         .next()
                         .is_some_and(|c| c.is_ascii_alphabetic())
                         && path_like[1..]
                             .strip_prefix(':')
                             .is_some_and(|path| path.starts_with('/') || path.starts_with('\\')))
+            }
+        }
     }
 
     pub fn is_windows(&self) -> bool {

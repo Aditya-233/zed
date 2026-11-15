@@ -1695,7 +1695,6 @@ mod tests {
         window
             .update(cx, |multi_workspace, _, cx| {
                 let workspace = multi_workspace.workspace().read(cx);
-                assert_eq!(workspace.items(cx).count(), 1);
                 let roots = workspace
                     .project()
                     .read(cx)

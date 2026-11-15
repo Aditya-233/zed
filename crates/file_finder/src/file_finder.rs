@@ -114,7 +114,6 @@ impl FileFinder {
         cx: &mut Context<Workspace>,
     ) -> Task<()> {
         let project = workspace.project().read(cx);
-        let fs = project.fs();
 
         let currently_opened_path = workspace.active_item(cx).and_then(|item| {
             let project_path = item.project_path(cx)?;
@@ -129,22 +128,9 @@ impl FileFinder {
             .recent_navigation_history(Some(MAX_RECENT_SELECTIONS), cx)
             .into_iter()
             .filter_map(|(project_path, abs_path)| {
-                if project.entry_for_path(&project_path, cx).is_some() {
-                    return Some(Task::ready(Some(FoundPath::new(project_path, abs_path?))));
-                }
-                let abs_path = abs_path?;
-                if project.is_local() {
-                    let fs = fs.clone();
-                    Some(cx.background_spawn(async move {
-                        if fs.is_file(&abs_path).await {
-                            Some(FoundPath::new(project_path, abs_path))
-                        } else {
-                            None
-                        }
-                    }))
-                } else {
-                    Some(Task::ready(Some(FoundPath::new(project_path, abs_path))))
-                }
+                let path = FoundPath::new(project_path, abs_path?);
+                let is_file = path.is_file(project, cx);
+                Some(cx.background_spawn(async move { is_file.await.then_some(path) }))
             })
             .collect::<Vec<_>>();
         cx.spawn_in(window, async move |workspace, cx| {
@@ -185,8 +171,9 @@ impl FileFinder {
                 .initial_width(Rems::from_pixels(modal_max_width, window))
         });
         let picker_focus_handle = picker.focus_handle(cx);
-        picker.update(cx, |picker, _| {
+        picker.update(cx, |picker, cx| {
             picker.delegate.focus_handle = picker_focus_handle.clone();
+            picker.delegate.refresh_history(window, cx);
         });
         Self {
             picker,
@@ -427,6 +414,7 @@ enum Match {
     },
     Search(ProjectPanelOrdMatch),
     Absolute(PathBuf),
+    #[allow(dead_code)]
     Channel {
         channel_id: ChannelId,
         channel_name: SharedString,
@@ -1065,6 +1053,7 @@ impl FileFinderDelegate {
             match event {
                 project::Event::WorktreeUpdatedEntries(_, _) => {
                     file_finder.picker.update(cx, |picker, cx| {
+                        picker.delegate.refresh_history(window, cx);
                         picker.delegate.debounce_next_refresh = true;
                         picker.refresh(window, cx);
                     })

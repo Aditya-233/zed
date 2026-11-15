@@ -136,7 +136,7 @@ pub struct EditPredictionSettingsContent {
     /// A list of globs representing files that edit predictions should be disabled for.
     /// This list adds to a pre-existing, sensible default set of globs.
     /// Any additional ones you add are combined with them.
-    pub disabled_globs: Option<Vec<String>>,
+    pub disabled_globs: Option<SplicingVec>,
     /// The mode used to display edit predictions in the buffer.
     /// Provider support required.
     pub mode: Option<EditPredictionsMode>,

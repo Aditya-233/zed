@@ -2300,6 +2300,8 @@ mod tests {
         zoom_scroll(position, 1., &mut cx);
         assert_eq!(buffer_font_size(&cx), initial_font_size);
     }
+
+    #[gpui::test]
     async fn edit_menu_copy_and_paste_are_available_when_terminal_is_focused(
         cx: &mut TestAppContext,
     ) {

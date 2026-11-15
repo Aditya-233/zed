@@ -312,6 +312,7 @@ pub struct ContextMenu {
     /// select an item. This prevents a visual flash where a submenu close in
     /// on_hover(false) returns focus to the main menu and on_focus_in
     /// re-selects the first item before the next on_hover(true) clears it.
+    /// Always true when accessibility support is disabled.
     suppress_focus_selection: bool,
 }
 
@@ -344,85 +345,14 @@ impl EventEmitter<DismissEvent> for ContextMenu {}
 impl FluentBuilder for ContextMenu {}
 
 impl ContextMenu {
+    #[inline(always)]
     pub fn new(
         window: &mut Window,
         cx: &mut Context<Self>,
-        f: impl FnOnce(Self, &mut Window, &mut Context<Self>) -> Self,
+        build_menu: impl FnOnce(Self, &mut Window, &mut Context<Self>) -> Self,
     ) -> Self {
-        let focus_handle = cx.retained_focus_handle();
-        let _on_blur_subscription = cx.on_blur(
-            &focus_handle,
-            window,
-            |this: &mut ContextMenu, window, cx| {
-                if let Some(ignore_until) = this.ignore_blur_until {
-                    if Instant::now() < ignore_until {
-                        return;
-                    } else {
-                        this.ignore_blur_until = None;
-                    }
-                }
-
-                if this.main_menu.is_none() {
-                    if let SubmenuState::Open(open_submenu) = &this.submenu_state {
-                        let submenu_focus = open_submenu.entity.read(cx).focus_handle.clone();
-                        if submenu_focus.contains_focused(window, cx) {
-                            return;
-                        }
-                    }
-                }
-
-                this.cancel(&menu::Cancel, window, cx)
-            },
-        );
-        window.refresh();
-
-        // When the menu first receives focus (i.e. when it opens), move the
-        // selection onto a menu item so assistive technology announces a real
-        // item rather than the bare menu container. Per the ARIA menu button
-        // pattern, opening a menu places focus on a menu item; for select-style
-        // menus we prefer the currently-checked item. We only do this when
-        // nothing is selected yet so we don't override an existing selection.
-        cx.on_focus_in(&focus_handle, window, |this, window, cx| {
-            if this.selected_index.is_none() && !this.suppress_focus_selection {
-                this.select_toggled_or_first(window, cx);
-            }
-            this.suppress_focus_selection = false;
-        })
-        .detach();
-
-        f(
-            Self {
-                builder: None,
-                items: Default::default(),
-                focus_handle,
-                action_context: None,
-                selected_index: None,
-                delayed: false,
-                clicked: false,
-                end_slot_action: None,
-                key_context: "menu".into(),
-                _on_blur_subscription: Some(_on_blur_subscription),
-                keep_open_on_confirm: false,
-                rebuild_parent_on_confirm: false,
-                fixed_width: None,
-                spacing: ListItemSpacing::default(),
-                main_menu: None,
-                main_menu_observed_bounds: Rc::new(Cell::new(None)),
-                documentation_aside: None,
-                aside_trigger_bounds: Rc::new(RefCell::new(HashMap::default())),
-                submenu_state: SubmenuState::Closed,
-                hover_target: HoverTarget::MainMenu,
-                submenu_trigger_bounds: Rc::new(RefCell::new(HashMap::default())),
-                submenu_bounds: Rc::new(Cell::new(None)),
-                submenu_depth: 0,
-                submenu_trigger_mouse_down: false,
-                content_focus_handle: None,
-                ignore_blur_until: None,
-                suppress_focus_selection: false,
-            },
-            window,
-            cx,
-        )
+        let menu = Self::new_inner(window, cx);
+        build_menu(menu, window, cx)
     }
 
     pub fn build(
@@ -472,14 +402,17 @@ impl ContextMenu {
             );
             window.refresh();
 
-            // See the note in `ContextMenu::new`: select an item when the menu
-            // opens so screen readers announce it instead of just "menu".
-            cx.on_focus_in(&focus_handle, window, |this, window, cx| {
-                if this.selected_index.is_none() {
-                    this.select_toggled_or_first(window, cx);
-                }
-            })
-            .detach();
+            if window.is_a11y_enabled() {
+                // See the note in `ContextMenu::new_inner`: select an item when the menu
+                // opens so screen readers announce it instead of just "menu".
+                cx.on_focus_in(&focus_handle, window, |this, window, cx| {
+                    if this.selected_index.is_none() && !this.suppress_focus_selection {
+                        this.select_toggled_or_first(window, cx);
+                    }
+                    this.suppress_focus_selection = false;
+                })
+                .detach();
+            }
 
             (builder.clone())(
                 Self {
@@ -509,7 +442,7 @@ impl ContextMenu {
                     submenu_trigger_mouse_down: false,
                     content_focus_handle: None,
                     ignore_blur_until: None,
-                    suppress_focus_selection: false,
+                    suppress_focus_selection: !window.is_a11y_enabled(),
                 },
                 window,
                 cx,
@@ -552,7 +485,7 @@ impl ContextMenu {
                 submenu_trigger_mouse_down: false,
                 content_focus_handle: None,
                 ignore_blur_until: None,
-                suppress_focus_selection: false,
+                suppress_focus_selection: !window.is_a11y_enabled(),
             },
             window,
             cx,
@@ -1098,7 +1031,7 @@ impl ContextMenu {
 
     pub fn confirm(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.selected_index else {
-            return;
+            return cx.emit(DismissEvent);
         };
 
         if let Some(ContextMenuItem::Submenu(submenu)) = self.items.get(ix) {
@@ -1523,7 +1456,7 @@ impl ContextMenu {
                 submenu_trigger_mouse_down: false,
                 content_focus_handle: None,
                 ignore_blur_until: None,
-                suppress_focus_selection: false,
+                suppress_focus_selection: !window.is_a11y_enabled(),
             };
 
             menu = (builder)(menu, window, cx);
@@ -1936,7 +1869,7 @@ impl ContextMenu {
                     }),
             )
             .when_some(submenu, |this, (submenu, trigger_bounds)| {
-                this.child(self.render_submenu_container(ix, submenu, trigger_bounds, window, cx))
+                this.child(self.render_submenu_container(ix, submenu, trigger_bounds.size, cx))
             })
     }
 
@@ -1958,21 +1891,9 @@ impl ContextMenu {
         &self,
         ix: usize,
         submenu: Entity<ContextMenu>,
-        trigger_bounds: Bounds<Pixels>,
-        window: &Window,
+        trigger_size: Size<Pixels>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let space_on_right = window.viewport_size().width - trigger_bounds.right();
-        let space_on_left = trigger_bounds.left();
-        let flip_left = space_on_right < CONTEXT_MENU_MIN_WIDTH && space_on_left > space_on_right;
-        let anchor_position = point(
-            if flip_left {
-                px(2.)
-            } else {
-                trigger_bounds.size.width - px(2.)
-            },
-            px(0.),
-        );
         let bounds_cell = self.submenu_bounds.clone();
         let canvas = canvas(
             {
@@ -1992,13 +1913,13 @@ impl ContextMenu {
         div().absolute().top_0().left_0().w(px(0.)).h(px(0.)).child(
             deferred(
                 anchored()
-                    .position(anchor_position)
                     .position_mode(AnchoredPositionMode::Local)
-                    .anchor(if flip_left {
-                        Anchor::TopRight
-                    } else {
-                        Anchor::TopLeft
-                    })
+                    .attach(
+                        Bounds::new(Point::default(), trigger_size),
+                        Anchor::TopRight,
+                    )
+                    .anchor(Anchor::TopLeft)
+                    .offset(point(px(-2.), px(0.)))
                     .snap_to_window_with_margin(px(8.0))
                     .child(
                         div()
@@ -2365,6 +2286,82 @@ impl ContextMenu {
                     }),
             )
             .into_any_element()
+    }
+
+    #[inline(never)]
+    fn new_inner(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.retained_focus_handle();
+        let _on_blur_subscription = cx.on_blur(
+            &focus_handle,
+            window,
+            |context_menu: &mut ContextMenu, window, cx| {
+                if let Some(ignore_until) = context_menu.ignore_blur_until {
+                    if Instant::now() < ignore_until {
+                        return;
+                    } else {
+                        context_menu.ignore_blur_until = None;
+                    }
+                }
+
+                if context_menu.main_menu.is_none() {
+                    if let SubmenuState::Open(open_submenu) = &context_menu.submenu_state {
+                        let submenu_focus = open_submenu.entity.read(cx).focus_handle.clone();
+                        if submenu_focus.contains_focused(window, cx) {
+                            return;
+                        }
+                    }
+                }
+
+                context_menu.cancel(&menu::Cancel, window, cx)
+            },
+        );
+        window.refresh();
+
+        if window.is_a11y_enabled() {
+            // When the menu first receives focus (i.e. when it opens), move the
+            // selection onto a menu item so assistive technology announces a real
+            // item rather than the bare menu container. Per the ARIA menu button
+            // pattern, opening a menu places focus on a menu item; for select-style
+            // menus we prefer the currently-checked item. We only do this when
+            // nothing is selected yet so we don't override an existing selection.
+            cx.on_focus_in(&focus_handle, window, |context_menu, window, cx| {
+                if context_menu.selected_index.is_none() && !context_menu.suppress_focus_selection {
+                    context_menu.select_toggled_or_first(window, cx);
+                }
+                context_menu.suppress_focus_selection = false;
+            })
+            .detach();
+        }
+
+        Self {
+            builder: None,
+            items: Vec::new(),
+            focus_handle,
+            action_context: None,
+            selected_index: None,
+            delayed: false,
+            clicked: false,
+            end_slot_action: None,
+            key_context: SharedString::from("menu"),
+            _on_blur_subscription: Some(_on_blur_subscription),
+            keep_open_on_confirm: false,
+            rebuild_parent_on_confirm: false,
+            fixed_width: None,
+            spacing: ListItemSpacing::default(),
+            main_menu: None,
+            main_menu_observed_bounds: Rc::new(Cell::new(None)),
+            documentation_aside: None,
+            aside_trigger_bounds: Rc::new(RefCell::new(HashMap::default())),
+            submenu_state: SubmenuState::Closed,
+            hover_target: HoverTarget::MainMenu,
+            submenu_trigger_bounds: Rc::new(RefCell::new(HashMap::default())),
+            submenu_bounds: Rc::new(Cell::new(None)),
+            submenu_depth: 0,
+            submenu_trigger_mouse_down: false,
+            content_focus_handle: None,
+            ignore_blur_until: None,
+            suppress_focus_selection: !window.is_a11y_enabled(),
+        }
     }
 }
 
@@ -3227,6 +3224,60 @@ mod tests {
                 assert!(submenu.right() <= px(692.));
             });
         }
+    }
+
+    #[gpui::test]
+    fn wide_submenu_opens_on_the_side_it_fits(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = settings::SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+        });
+
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            let menu = ContextMenu::build(window, cx, |menu, _, _| {
+                menu.submenu("Wide", |menu, _, _| {
+                    menu.custom_row(|_, _| div().w(px(320.)).child("wide").into_any_element())
+                })
+            });
+            SubmenuTestView {
+                menu,
+                left: px(400.),
+            }
+        });
+        cx.run_until_parked();
+        let menu = window
+            .update(cx, |view, _, _| view.menu.clone())
+            .expect("submenu window");
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        draw_frames(&mut visual);
+
+        menu.update_in(&mut visual, |menu, window, cx| {
+            menu.select_first(&SelectFirst, window, cx);
+            menu.select_submenu_child(&SelectChild, window, cx);
+        });
+        draw_frames(&mut visual);
+
+        menu.read_with(&visual, |menu, _| {
+            let trigger = menu
+                .submenu_trigger_bounds
+                .borrow()
+                .get(&0)
+                .copied()
+                .expect("trigger bounds");
+            let submenu = menu.submenu_bounds.get().expect("submenu bounds");
+            let space_on_right = px(900.) - trigger.right();
+            assert!(
+                space_on_right > CONTEXT_MENU_MIN_WIDTH && space_on_right < submenu.size.width,
+                "trigger: {trigger:?}, submenu: {submenu:?}"
+            );
+            assert_eq!(
+                submenu.right(),
+                trigger.left() + px(2.),
+                "trigger: {trigger:?}, submenu: {submenu:?}"
+            );
+            assert_eq!(submenu.top(), trigger.top());
+        });
     }
 
     #[gpui::test]

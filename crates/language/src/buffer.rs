@@ -3094,6 +3094,7 @@ impl Buffer {
             return;
         }
 
+        self.pending_autoindent.take();
         self.reparse(cx, true);
         cx.emit(BufferEvent::Edited { source });
         let is_dirty = self.is_dirty();
