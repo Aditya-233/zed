@@ -2,7 +2,7 @@ use std::{any::Any, fmt::Debug, ops::Not, time::Duration};
 use web_time::Instant;
 
 use gpui::{
-    Along, Anchor, AnyElement, App, AppContext as _, Axis as ScrollbarAxis, BorderStyle, Bounds,
+    Along, Anchor, App, AppContext as _, Axis as ScrollbarAxis, BorderStyle, Bounds,
     ContentMask, Context, Corners, CursorStyle, DispatchPhase, Div, Edges, Element, ElementId,
     Entity, EntityId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
     IntoElement, IsZero, LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
