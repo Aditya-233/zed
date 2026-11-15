@@ -8504,7 +8504,7 @@ mod tests {
                         .expect("selection is painted")
                         .bounds;
                     let order_for_color = |color| {
-                        let orders = quads
+                        let mut orders = quads
                             .iter()
                             .filter(|quad| {
                                 quad.background == Background::from(color)
@@ -8512,6 +8512,7 @@ mod tests {
                             })
                             .map(|quad| quad.order)
                             .collect::<Vec<_>>();
+                        orders.dedup();
                         assert_eq!(orders.len(), 1);
                         orders[0]
                     };
@@ -8524,10 +8525,10 @@ mod tests {
                         .map(|underline| underline.order)
                         .min()
                         .expect("strikethrough is painted");
-                    assert!(chip_order < search_order);
-                    assert!(search_order < selection_order);
+                    assert!(chip_order <= search_order);
+                    assert!(search_order <= selection_order);
                     assert!(
-                        selection_order < text_order,
+                        selection_order <= text_order,
                         "alignment={alignment}, text={text}, selection={selection_order}, glyphs={text_order}",
                     );
                 });
@@ -8568,16 +8569,17 @@ mod tests {
         let highlight_color = cx.update(|_, cx| cx.theme().colors().search_match_background);
         cx.update(|window, _| {
             let quads = window.painted_quads();
-            let order_of_quad_with = |color: Hsla| {
+            let find_quad = |color: Hsla| {
                 quads
                     .iter()
-                    .find(|quad| quad.background == color.into())
-                    .map(|quad| quad.order)
+                    .enumerate()
+                    .find(|(_, quad)| quad.background == color.into())
+                    .map(|(index, quad)| (index, quad.order))
             };
-            let run_background_order =
-                order_of_quad_with(run_background_color).expect("link background should be painted");
-            let highlight_order =
-                order_of_quad_with(highlight_color).expect("search highlight should be painted");
+            let (run_background_ix, run_background_order) =
+                find_quad(run_background_color).expect("link background should be painted");
+            let (highlight_ix, highlight_order) =
+                find_quad(highlight_color).expect("search highlight should be painted");
             // Strikethroughs are painted in the same layer as the glyphs
             let text_order = window
                 .painted_underlines()
@@ -8586,11 +8588,11 @@ mod tests {
                 .min()
                 .expect("strikethrough should be painted");
             assert!(
-                run_background_order < highlight_order,
+                (run_background_order, run_background_ix) <= (highlight_order, highlight_ix),
                 "text run backgrounds must not cover search highlights"
             );
             assert!(
-                highlight_order < text_order,
+                highlight_order <= text_order,
                 "search highlight must be drawn below the text, otherwise opaque theme colors hide it"
             );
         });

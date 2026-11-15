@@ -1145,7 +1145,6 @@ impl LanguageServer {
                         }),
                     }),
                     show_document: Some(ShowDocumentClientCapabilities { support: true }),
-                    ..WindowClientCapabilities::default()
                 }),
             },
             trace: None,
