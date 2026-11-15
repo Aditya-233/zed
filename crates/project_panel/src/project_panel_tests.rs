@@ -11100,7 +11100,7 @@ async fn test_focus_follows_mouse_keeps_rename_and_context_menu_open(
     panel.update_in(cx, |panel, window, cx| {
         panel.cancel(&menu::Cancel, window, cx);
         panel.deploy_context_menu(
-            ContextMenuPlacement::AtMouse(point(px(1700.), px(30.))),
+            point(px(1700.), px(30.)),
             entry_id,
             window,
             cx,

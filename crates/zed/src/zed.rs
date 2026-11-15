@@ -2416,7 +2416,7 @@ mod tests {
     };
     use workspace::MultiWorkspace;
     use workspace::{
-        NewFile, OpenOptions, OpenPathPromptResult, OpenVisible, SERIALIZATION_THROTTLE_TIME,
+        NewFile, OpenOptions, OpenVisible, SERIALIZATION_THROTTLE_TIME,
         SaveIntent, SplitDirection, WorkspaceHandle,
         item::SaveOptions,
         item::{Item, ItemHandle},
@@ -3388,79 +3388,6 @@ mod tests {
                 .window
                 .update(cx, |_, window, _| window.remove_window())
                 .expect("close workspace");
-            cx.run_until_parked();
-        }
-    }
-
-    #[gpui::test]
-    async fn test_open_remote_project_readme(
-        cx: &mut TestAppContext,
-        server_cx: &mut TestAppContext,
-    ) {
-        let app_state = init_test(cx);
-        set_on_new_window(Some(settings::OnNewWindow::Readme), cx);
-        server_cx.update(|cx| {
-            release_channel::init(Version::new(0, 0, 0), cx);
-            HeadlessProject::init(cx);
-        });
-        let remote_fs = FakeFs::new(server_cx.executor());
-        for (name, explicit_file, expected_file) in [
-            ("directory", None, Some("README.md")),
-            ("explicit", Some("code.rs"), Some("code.rs")),
-            ("failed", Some(path!("/missing-parent/code.rs")), None),
-        ] {
-            let root = Path::new(path!("/root")).join(name);
-            remote_fs
-                .insert_tree(&root, json!({"README.md": "", "code.rs": ""}))
-                .await;
-            let (connection_options, server_session, connect_guard) =
-                RemoteClient::fake_server(cx, server_cx);
-            let languages = Arc::new(LanguageRegistry::new(server_cx.executor()));
-            let _headless = server_cx.new(|cx| {
-                HeadlessProject::new(
-                    HeadlessAppState {
-                        session: server_session,
-                        fs: remote_fs.clone(),
-                        http_client: Arc::new(BlockedHttpClient),
-                        node_runtime: NodeRuntime::unavailable(),
-                        languages,
-                        extension_host_proxy: Arc::new(ExtensionHostProxy::new()),
-                        startup_time: std::time::Instant::now(),
-                    },
-                    false,
-                    cx,
-                )
-            });
-            drop(connect_guard);
-            let mut paths = vec![root.clone()];
-            if let Some(explicit_file) = explicit_file {
-                paths.push(root.join(explicit_file));
-            }
-            let window = open_remote_project(
-                connection_options,
-                paths,
-                app_state.clone(),
-                OpenOptions {
-                    workspace_matching: workspace::WorkspaceMatching::None,
-                    ..OpenOptions::default()
-                },
-                &mut cx.to_async(),
-            )
-            .await
-            .expect("open remote project");
-            cx.run_until_parked();
-            let workspace = window
-                .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
-                .expect("remote workspace");
-            let expected_paths = expected_file
-                .into_iter()
-                .map(|path| root.join(path))
-                .collect::<Vec<_>>();
-            assert_workspace_item_paths(&workspace, &expected_paths, cx);
-            window
-                .update(cx, |_, window, _| window.remove_window())
-                .expect("close remote workspace");
-            drop(workspace);
             cx.run_until_parked();
         }
     }

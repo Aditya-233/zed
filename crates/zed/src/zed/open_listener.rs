@@ -803,6 +803,7 @@ async fn open_local_workspace(
             && cx.update(|cx| {
                 let active_window = cx.active_window();
                 workspace::workspace_windows_for_location(&SerializedWorkspaceLocation::Local, cx)
+                    .iter()
                     .any(|window| Some(window.into()) == active_window)
             });
         if !add_to_active_window {
@@ -1633,8 +1634,7 @@ mod tests {
                         &open_options,
                         &workspace::SerializedWorkspaceLocation::Local,
                         &mut cx.to_async(),
-                    )
-                    .await;
+                    );
                     let (target_window, target_workspace) =
                         target.expect("existing local workspace");
                     assert_eq!(target_window, window);
@@ -1814,7 +1814,6 @@ mod tests {
             &workspace::SerializedWorkspaceLocation::Local,
             &mut cx.to_async(),
         )
-        .await
         .0
         .unwrap()
         .0;

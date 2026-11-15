@@ -2745,6 +2745,8 @@ impl Window {
         self.rendered_frame.scene.quads.clone()
     }
 
+    /// Returns the underlines in the most recently rendered frame's scene, so tests can assert on
+    /// painted underlines without rasterizing the frame.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_underlines(&self) -> Vec<Underline> {
         self.rendered_frame.scene.underlines.clone()
