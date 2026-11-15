@@ -1514,7 +1514,6 @@ impl DisplaySnapshot {
         self.companion_display_snapshot.as_deref()
     }
 
-
     pub fn inlay_hint_at(&self, point: DisplayPoint) -> Option<(&Inlay, usize)> {
         if point.row() > self.max_point().row()
             || self.is_block_line(point.row())
@@ -1602,7 +1601,6 @@ impl DisplaySnapshot {
                 wavy: true,
             })
     }
-
 
     pub fn wrap_snapshot(&self) -> &WrapSnapshot {
         &self.block_snapshot.wrap_snapshot

@@ -7589,6 +7589,7 @@ mod tests {
         MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, RequestFrameOptions,
         StatefulInteractiveElement as _, Styled, TestAppContext, TouchDragEvent, TouchEvent,
         TouchId, TouchPhase, Window, WindowAppearance, WindowOptions, canvas, div, point, px, size,
+    };
 
     #[gpui::test]
     fn test_drag_cursor_applies_before_next_paint(cx: &mut TestAppContext) {
@@ -7662,7 +7663,6 @@ mod tests {
         });
         assert!(update_result.is_ok());
     }
-    };
 
     #[test]
     fn frame_throttle_tracks_display_refreshes() {

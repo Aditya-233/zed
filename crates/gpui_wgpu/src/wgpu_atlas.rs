@@ -554,11 +554,17 @@ mod tests {
 
         let first_key = make_key(1);
         let first_tile = insert(&first_key);
-        let first_generation = atlas.get_texture_info(first_tile.texture_id).unwrap().generation;
+        let first_generation = atlas
+            .get_texture_info(first_tile.texture_id)
+            .unwrap()
+            .generation;
         atlas.remove(&first_key);
 
         let second_tile = insert(&make_key(2));
-        let second_generation = atlas.get_texture_info(second_tile.texture_id).unwrap().generation;
+        let second_generation = atlas
+            .get_texture_info(second_tile.texture_id)
+            .unwrap()
+            .generation;
 
         assert_eq!(second_tile.texture_id, first_tile.texture_id);
         assert_ne!(second_generation, first_generation);

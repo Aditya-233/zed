@@ -49883,7 +49883,6 @@ async fn test_scroll_range_hold_freezes_before_first_settled_frame(cx: &mut Test
     });
 }
 
-
 #[gpui::test]
 async fn test_open_docs(cx: &mut TestAppContext) {
     init_test(cx, |_| {});

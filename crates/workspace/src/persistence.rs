@@ -3512,7 +3512,6 @@ mod tests {
             path_style: PathStyle::local(),
         };
 
-
         let workspace_6 = SerializedWorkspace {
             id: WorkspaceId(6),
             paths: PathList::new(&["/tmp6c", "/tmp6b", "/tmp6a"]),
@@ -3734,7 +3733,6 @@ mod tests {
             path_style: PathStyle::local(),
         }
     }
-
 
     async fn local_recent_workspace(
         workspace_id: WorkspaceId,

@@ -185,7 +185,6 @@ pub(crate) fn default_open_in_new_window(cx: &App) -> bool {
 }
 
 pub fn init(cx: &mut App) {
-
     cx.on_action(|open_recent: &OpenRecent, cx| {
         let create_new_window = open_recent.create_new_window;
 

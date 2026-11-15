@@ -2168,9 +2168,7 @@ fn first_project_directory(workspace: &Workspace, cx: &App) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{
-        ScrollDelta, ScrollWheelEvent, TestAppContext, UpdateGlobal, VisualTestContext,
-    };
+    use gpui::{ScrollDelta, ScrollWheelEvent, TestAppContext, UpdateGlobal, VisualTestContext};
     use project::{Entry, Project, ProjectPath, Worktree};
     use std::path::{Path, PathBuf};
     use util::paths::PathStyle;

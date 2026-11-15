@@ -1975,7 +1975,6 @@ impl Terminal {
         cx.emit(Event::Wakeup);
     }
 
-
     pub fn total_lines(&self) -> usize {
         total_lines(&self.term.lock_unfair())
     }

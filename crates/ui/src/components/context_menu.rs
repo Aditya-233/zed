@@ -1,6 +1,7 @@
 use crate::{
     ButtonCommon, ButtonStyle, IconButtonShape, KeyBinding, List, ListItem, ListItemSpacing,
-    ListSeparator, ListSubHeader, Tooltip, prelude::*,
+    ListSeparator, ListSubHeader, Tooltip,
+    prelude::*,
     utils::{RetainedFocusExt as _, WithRemSize},
 };
 use gpui::{
@@ -519,7 +520,6 @@ impl ContextMenu {
         let Some(builder) = self.builder.clone() else {
             return;
         };
-
 
         let new_menu = (builder.clone())(
             Self {
@@ -2363,7 +2363,6 @@ impl ContextMenu {
             )
             .into_any_element()
     }
-
 }
 
 impl ContextMenuItem {

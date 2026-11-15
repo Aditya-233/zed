@@ -257,7 +257,8 @@ impl RenderOnce for Icon {
             .size(self.size)
             .flex_none()
             .text_color(color)
-            .into_any_element()    }
+            .into_any_element()
+    }
 }
 
 #[derive(IntoElement)]

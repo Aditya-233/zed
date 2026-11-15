@@ -3866,7 +3866,6 @@ async fn test_nonexistent_history_items_not_shown(cx: &mut gpui::TestAppContext)
     });
 }
 
-
 #[gpui::test]
 async fn test_deleted_history_items_removed_while_picker_is_open(cx: &mut TestAppContext) {
     let app_state = init_test(cx);

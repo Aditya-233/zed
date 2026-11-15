@@ -2983,7 +2983,6 @@ mod tests {
 
     use super::*;
 
-
     #[derive(Clone)]
     struct FakeDataOffer {
         name: &'static str,

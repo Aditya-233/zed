@@ -5666,7 +5666,6 @@ let c = 3;"#
             .unwrap();
     }
 
-
     #[gpui::test]
     async fn test_inlay_hints_at_buffer_bounds(cx: &mut TestAppContext) {
         let mut cx = EditorLspTestContext::new_rust(
@@ -5817,7 +5816,6 @@ let c = 3;"#
         })
         .unwrap();
     }
-
 
     pub(crate) fn init_test(cx: &mut TestAppContext, f: &dyn Fn(&mut AllLanguageSettingsContent)) {
         cx.update(|cx| {
