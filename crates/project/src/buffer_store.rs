@@ -4,6 +4,7 @@ use crate::{
     worktree_store::{WorktreeStore, WorktreeStoreEvent},
 };
 use anyhow::{Context as _, Result, anyhow};
+use askpass::{AskPassDelegate, AskPassResult, AskPassSession};
 use client::Client;
 use collections::{HashMap, HashSet, hash_map};
 use futures::{Future, FutureExt as _, StreamExt as _, channel::oneshot, future::Shared};
@@ -385,12 +386,14 @@ impl RemoteBufferStore {
 }
 
 impl LocalBufferStore {
+    /// `old_file` is given when saving the buffer to a new path, holding the file the buffer had
+    /// before, if any.
     fn save_local_buffer(
         &self,
         buffer_handle: Entity<Buffer>,
         worktree: Entity<Worktree>,
         path: Arc<RelPath>,
-        mut has_changed_file: bool,
+        old_file: Option<Option<Arc<dyn language::File>>>,
         cx: &mut Context<BufferStore>,
     ) -> Task<Result<()>> {
         let buffer = buffer_handle.read(cx);
@@ -402,12 +405,10 @@ impl LocalBufferStore {
         let version = buffer.version();
         let buffer_id = buffer.remote_id();
         let file = buffer.file().cloned();
-        if file
-            .as_ref()
-            .is_some_and(|file| file.disk_state() == DiskState::New)
-        {
-            has_changed_file = true;
-        }
+        let has_changed_file = old_file.is_some()
+            || file
+                .as_ref()
+                .is_some_and(|file| file.disk_state() == DiskState::New);
 
         let save = worktree.update(cx, |worktree, cx| {
             worktree.write_file(path, text, line_ending, encoding, has_bom, cx)
@@ -437,12 +438,172 @@ impl LocalBufferStore {
                         .log_err();
                 }
             })?;
+            if has_changed_file {
+                buffer_handle.update(cx, |buffer, cx| buffer.file_updated(new_file, cx));
+            }
+            // Report the new path before the save, so that observers like language servers know
+            // the document by its new path when they learn about the save.
+            if let Some(old_file) = old_file {
+                this.update(cx, |this, cx| {
+                    this.did_change_buffer_file_path(buffer_handle.clone(), old_file, cx)
+                })?;
+            }
             buffer_handle.update(cx, |buffer, cx| {
-                if has_changed_file {
-                    buffer.file_updated(new_file, cx);
-                }
                 buffer.did_save(version.clone(), mtime, cx);
             });
+            Ok(())
+        })
+    }
+
+    fn save_local_buffer_elevated(
+        &self,
+        buffer_handle: Entity<Buffer>,
+        worktree: Entity<Worktree>,
+        path: Arc<RelPath>,
+        askpass: Option<AskPassDelegate>,
+        cx: &mut Context<BufferStore>,
+    ) -> Task<Result<()>> {
+        let buffer = buffer_handle.read(cx);
+        let text = buffer.as_rope().clone();
+        let line_ending = buffer.line_ending();
+        let version = buffer.version();
+        let abs_path = worktree.read(cx).absolutize(&path);
+
+        cx.spawn(async move |this, cx| {
+            let mut temp_file = tempfile::NamedTempFile::new()?;
+            let text_string = match line_ending {
+                LineEnding::Unix => text.to_string(),
+                LineEnding::Windows => text.to_string().replace('\n', "\r\n"),
+            };
+            std::io::Write::write_all(&mut temp_file, text_string.as_bytes())?;
+            std::io::Write::flush(&mut temp_file)?;
+            let temp_path = temp_file.path().to_path_buf();
+
+            let current_exe = std::env::current_exe()?;
+
+            let run_elevated = async {
+                let mut last_error = String::new();
+
+                // 1. Try native Zed AskPass modal via sudo -A (Zero external GUI tools/agents required)
+                if let Some(delegate) = askpass {
+                    if which::which("sudo").is_ok() {
+                        let mut askpass_session =
+                            AskPassSession::new(cx.background_executor().clone(), delegate).await?;
+
+                        let mut cmd = util::command::new_command("sudo");
+                        cmd.arg("-A");
+                        cmd.env("SUDO_ASKPASS", askpass_session.script_path());
+                        #[cfg(target_os = "windows")]
+                        cmd.env("ZED_ASKPASS_SOCKET", askpass_session.socket_path());
+                        cmd.arg(&current_exe)
+                            .arg("--file-write")
+                            .arg(&temp_path)
+                            .arg(&abs_path);
+
+                        let child = cmd.spawn()?;
+                        let askpass_run = askpass_session.run(None);
+
+                        let output = futures::select_biased! {
+                            result = askpass_run.fuse() => {
+                                match result {
+                                    AskPassResult::CancelledByUser => {
+                                        anyhow::bail!("Elevated save cancelled by user");
+                                    }
+                                    AskPassResult::Timedout => {
+                                        anyhow::bail!("Authentication timed out");
+                                    }
+                                }
+                            }
+                            res = child.output().fuse() => res?,
+                        };
+
+                        if output.status.success() {
+                            return Ok(());
+                        } else {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            if !err.trim().is_empty() {
+                                last_error = err.trim().to_string();
+                            }
+                        }
+                    }
+                }
+
+                // 2. Try pkexec (standard graphical polkit escalation if agent is available)
+                if which::which("pkexec").is_ok() {
+                    let mut cmd = util::command::new_command("pkexec");
+                    cmd.arg(&current_exe)
+                        .arg("--file-write")
+                        .arg(&temp_path)
+                        .arg(&abs_path);
+                    if let Ok(output) = cmd.output().await {
+                        if output.status.success() {
+                            return Ok(());
+                        } else {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            if !err.trim().is_empty() {
+                                last_error = err.trim().to_string();
+                            }
+                        }
+                    }
+                }
+
+                // 3. Try sudo with SUDO_ASKPASS or cached credentials
+                if which::which("sudo").is_ok() {
+                    let mut cmd = util::command::new_command("sudo");
+                    if std::env::var("SUDO_ASKPASS").is_ok() {
+                        cmd.arg("-A");
+                    } else {
+                        cmd.arg("-n");
+                    }
+                    cmd.arg(&current_exe)
+                        .arg("--file-write")
+                        .arg(&temp_path)
+                        .arg(&abs_path);
+                    if let Ok(output) = cmd.output().await {
+                        if output.status.success() {
+                            return Ok(());
+                        } else {
+                            let err = String::from_utf8_lossy(&output.stderr);
+                            if !err.trim().is_empty() {
+                                last_error = err.trim().to_string();
+                            }
+                        }
+                    }
+                }
+
+                if last_error.contains("cancelled by user") {
+                    anyhow::bail!("Elevated save was cancelled.");
+                } else if last_error.is_empty() {
+                    anyhow::bail!(
+                        "Elevated save failed: could not authenticate with superuser privileges."
+                    );
+                } else {
+                    anyhow::bail!("Elevated save failed: {}", last_error);
+                }
+            };
+
+            run_elevated.await?;
+
+            let refresh_task = this.update(cx, |_, cx| {
+                worktree.update(cx, |worktree, cx| {
+                    worktree
+                        .as_local_mut()
+                        .map(|w| w.refresh_entry(path.clone(), None, cx))
+                })
+            })?;
+
+            let entry = if let Some(task) = refresh_task {
+                task.await.log_err().flatten()
+            } else {
+                None
+            };
+
+            let mtime = entry.and_then(|e| e.mtime);
+
+            buffer_handle.update(cx, |buffer, cx| {
+                buffer.did_save(version.clone(), mtime, cx);
+            });
+
             Ok(())
         })
     }
@@ -658,7 +819,20 @@ impl LocalBufferStore {
             return Task::ready(Err(anyhow!("buffer doesn't have a file")));
         };
         let worktree = file.worktree.clone();
-        self.save_local_buffer(buffer, worktree, file.path.clone(), false, cx)
+        self.save_local_buffer(buffer, worktree, file.path.clone(), None, cx)
+    }
+
+    pub(crate) fn save_buffer_elevated(
+        &self,
+        buffer: Entity<Buffer>,
+        askpass: Option<AskPassDelegate>,
+        cx: &mut Context<BufferStore>,
+    ) -> Task<Result<()>> {
+        let Some(file) = File::from_dyn(buffer.read(cx).file()) else {
+            return Task::ready(Err(anyhow!("buffer doesn't have a file")));
+        };
+        let worktree = file.worktree.clone();
+        self.save_local_buffer_elevated(buffer, worktree, file.path.clone(), askpass, cx)
     }
 
     fn save_buffer_as(
@@ -674,7 +848,8 @@ impl LocalBufferStore {
         else {
             return Task::ready(Err(anyhow!("no such worktree")));
         };
-        self.save_local_buffer(buffer, worktree, path.path, true, cx)
+        let old_file = buffer.read(cx).file().cloned();
+        self.save_local_buffer(buffer, worktree, path.path, Some(old_file), cx)
     }
 
     #[ztracing::instrument(skip_all)]
@@ -982,32 +1157,54 @@ impl BufferStore {
         }
     }
 
+    pub fn save_buffer_elevated(
+        &mut self,
+        buffer: Entity<Buffer>,
+        askpass: Option<AskPassDelegate>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        match &mut self.state {
+            BufferStoreState::Local(this) => this.save_buffer_elevated(buffer, askpass, cx),
+            BufferStoreState::Remote(_) => {
+                Task::ready(Err(anyhow!("cannot save remote buffer with sudo")))
+            }
+        }
+    }
+
     pub fn save_buffer_as(
         &mut self,
         buffer: Entity<Buffer>,
         path: ProjectPath,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
-        let old_file = buffer.read(cx).file().cloned();
-        let task = match &self.state {
-            BufferStoreState::Local(this) => this.save_buffer_as(buffer.clone(), path, cx),
+        match &self.state {
+            BufferStoreState::Local(this) => this.save_buffer_as(buffer, path, cx),
             BufferStoreState::Remote(this) => {
-                this.save_remote_buffer(buffer.clone(), Some(path.to_proto()), cx)
-            }
-        };
-        cx.spawn(async move |this, cx| {
-            task.await?;
-            this.update(cx, |this, cx| {
-                old_file.clone().and_then(|file| {
-                    this.path_to_buffer_id.remove(&ProjectPath {
-                        worktree_id: file.worktree_id(cx),
-                        path: file.path().clone(),
+                let old_file = buffer.read(cx).file().cloned();
+                let task = this.save_remote_buffer(buffer.clone(), Some(path.to_proto()), cx);
+                cx.spawn(async move |this, cx| {
+                    task.await?;
+                    this.update(cx, |this, cx| {
+                        this.did_change_buffer_file_path(buffer, old_file, cx)
                     })
-                });
+                })
+            }
+        }
+    }
 
-                cx.emit(BufferStoreEvent::BufferChangedFilePath { buffer, old_file });
-            })
-        })
+    fn did_change_buffer_file_path(
+        &mut self,
+        buffer: Entity<Buffer>,
+        old_file: Option<Arc<dyn language::File>>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(file) = &old_file {
+            self.path_to_buffer_id.remove(&ProjectPath {
+                worktree_id: file.worktree_id(cx),
+                path: file.path().clone(),
+            });
+        }
+        cx.emit(BufferStoreEvent::BufferChangedFilePath { buffer, old_file });
     }
 
     fn add_buffer(&mut self, buffer_entity: Entity<Buffer>, cx: &mut Context<Self>) -> Result<()> {

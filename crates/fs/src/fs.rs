@@ -1,4 +1,5 @@
 pub mod fs_watcher;
+mod git_clone_progress;
 
 pub use fs_watcher::requires_poll_watcher;
 
@@ -18,7 +19,7 @@ use gpui::ReadGlobal as _;
 use gpui::SharedString;
 #[cfg(unix)]
 use std::ffi::CString;
-use util::command::new_command;
+use util::command::{Stdio, new_command};
 
 #[cfg(unix)]
 use std::os::fd::{AsFd, AsRawFd};
@@ -26,7 +27,7 @@ use std::os::fd::{AsFd, AsRawFd};
 use std::os::unix::ffi::OsStrExt;
 
 #[cfg(unix)]
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 
 #[cfg(any(target_os = "macos", target_os = "freebsd"))]
 use std::mem::MaybeUninit;
@@ -34,6 +35,7 @@ use std::mem::MaybeUninit;
 use async_tar::Archive;
 use futures::{AsyncRead, Stream, StreamExt, future::BoxFuture};
 use git::repository::{GitRepository, RealGitRepository};
+#[cfg(windows)]
 use is_executable::IsExecutable;
 use rope::Rope;
 use serde::{Deserialize, Serialize};
@@ -73,6 +75,10 @@ pub trait Watcher: Send + Sync {
     fn add(&self, path: &Path) -> Result<()>;
     fn remove(&self, path: &Path) -> Result<()>;
 }
+
+pub trait ReadSeek: io::Read + io::Seek {}
+
+impl<T: io::Read + io::Seek + ?Sized> ReadSeek for T {}
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum PathEventKind {
@@ -128,7 +134,7 @@ pub trait Fs: Send + Sync {
     async fn remove_file(&self, path: &Path, options: RemoveOptions) -> Result<()>;
 
     async fn open_handle(&self, path: &Path) -> Result<Arc<dyn FileHandle>>;
-    async fn open_sync(&self, path: &Path) -> Result<Box<dyn io::Read + Send + Sync>>;
+    async fn open_sync(&self, path: &Path) -> Result<Box<dyn ReadSeek + Send + Sync>>;
     async fn load(&self, path: &Path) -> Result<String> {
         Ok(String::from_utf8(self.load_bytes(path).await?)?)
     }
@@ -326,6 +332,7 @@ pub struct JobInfo {
 #[derive(Debug, Clone)]
 pub enum JobEvent {
     Started { info: JobInfo },
+    Updated { id: JobId, message: SharedString },
     Completed { id: JobId },
 }
 
@@ -349,6 +356,18 @@ impl JobTracker {
             });
         }
         Self { id, subscribers }
+    }
+
+    fn update(&self, message: SharedString) {
+        let mut subscribers = self.subscribers.lock();
+        subscribers.retain(|sender| {
+            sender
+                .unbounded_send(JobEvent::Updated {
+                    id: self.id,
+                    message: message.clone(),
+                })
+                .is_ok()
+        });
     }
 }
 
@@ -889,7 +908,7 @@ impl Fs for RealFs {
         Ok(self.trash.lock().insert(entry))
     }
 
-    async fn open_sync(&self, path: &Path) -> Result<Box<dyn io::Read + Send + Sync>> {
+    async fn open_sync(&self, path: &Path) -> Result<Box<dyn ReadSeek + Send + Sync>> {
         Ok(Box::new(std::fs::File::open(path)?))
     }
 
@@ -1087,7 +1106,12 @@ impl Fs for RealFs {
         #[cfg(unix)]
         let is_fifo = metadata.file_type().is_fifo();
 
+        #[cfg(unix)]
+        let is_executable = metadata.is_file() && metadata.permissions().mode() & 0o111 != 0;
+
+        #[cfg(windows)]
         let path_buf = path.to_path_buf();
+        #[cfg(windows)]
         let is_executable = self
             .executor
             .spawn(async move { path_buf.is_executable() })
@@ -1242,18 +1266,28 @@ impl Fs for RealFs {
             message: SharedString::from(format!("Cloning {}", repo_url)),
         };
 
-        let _job_tracker = JobTracker::new(job_info, self.job_event_subscribers.clone());
-
-        let output = new_command("git")
+        let job_tracker = JobTracker::new(job_info, self.job_event_subscribers.clone());
+        let mut child = new_command("git")
             .current_dir(abs_work_directory)
-            .args(&["clone", repo_url])
-            .output()
-            .await?;
+            .args(["clone", "--progress", repo_url])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+        let stderr = child
+            .stderr
+            .take()
+            .context("failed to read git clone progress")?;
+        let stderr_output = git_clone_progress::read(stderr, |message| {
+            job_tracker.update(message.into());
+        })
+        .await?;
+        let status = child.status().await?;
 
-        if !output.status.success() {
+        if !status.success() {
             anyhow::bail!(
                 "git clone failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim_end()
+                git_clone_progress::failure_message(&stderr_output)
             );
         }
 
@@ -1414,7 +1448,6 @@ struct FakeFsState {
     metadata_call_count: usize,
     read_dir_call_count: usize,
     path_write_counts: std::collections::HashMap<PathBuf, usize>,
-    moves: std::collections::HashMap<u64, PathBuf>,
     job_event_subscribers: Arc<Mutex<Vec<JobEventSender>>>,
     trash: Mutex<SlotMap<TrashId, (TrashedEntry, FakeFsEntry)>>,
     file_to_create_before_watch_add: Option<(PathBuf, PathBuf)>,
@@ -1748,7 +1781,6 @@ impl FakeFs {
                 read_dir_call_count: 0,
                 metadata_call_count: 0,
                 path_write_counts: Default::default(),
-                moves: Default::default(),
                 job_event_subscribers: Arc::new(Mutex::new(Vec::new())),
                 trash: Mutex::new(SlotMap::with_key()),
                 file_to_create_before_watch_add: None,
@@ -2845,13 +2877,23 @@ struct FakeHandle {
 impl FileHandle for FakeHandle {
     fn current_path(&self, fs: &Arc<dyn Fs>) -> Result<PathBuf> {
         let fs = fs.as_fake();
-        let mut state = fs.state.lock();
-        let Some(target) = state.moves.get(&self.inode).cloned() else {
-            anyhow::bail!("fake fd not moved")
-        };
-
-        if state.try_entry(&target, false).is_some() {
-            return Ok(target);
+        let state = fs.state.lock();
+        let mut queue = collections::VecDeque::new();
+        queue.push_back((PathBuf::from(util::path!("/")), &state.root));
+        while let Some((path, entry)) = queue.pop_front() {
+            match entry {
+                FakeFsEntry::File { inode, .. } | FakeFsEntry::Dir { inode, .. }
+                    if *inode == self.inode =>
+                {
+                    return Ok(path);
+                }
+                FakeFsEntry::Dir { entries, .. } => {
+                    for (name, entry) in entries {
+                        queue.push_back((path.join(name), entry));
+                    }
+                }
+                _ => {}
+            }
         }
         anyhow::bail!("fake fd target not found")
     }
@@ -3006,12 +3048,6 @@ impl Fs for FakeFs {
             return Ok(());
         }
 
-        let inode = match moved_entry {
-            FakeFsEntry::File { inode, .. } => inode,
-            FakeFsEntry::Dir { inode, .. } => inode,
-            _ => 0,
-        };
-
         let mut moved = true;
         state.write_path(&new_path, |e| {
             match e {
@@ -3037,8 +3073,6 @@ impl Fs for FakeFs {
         if !moved {
             return Ok(());
         }
-
-        state.moves.insert(inode, new_path.clone());
 
         state
             .write_path(&old_path, |e| {
@@ -3133,7 +3167,7 @@ impl Fs for FakeFs {
         self.remove_file_inner(path, options).await.map(|_| ())
     }
 
-    async fn open_sync(&self, path: &Path) -> Result<Box<dyn io::Read + Send + Sync>> {
+    async fn open_sync(&self, path: &Path) -> Result<Box<dyn ReadSeek + Send + Sync>> {
         let bytes = self.load_internal(path).await?;
         Ok(Box::new(io::Cursor::new(bytes)))
     }

@@ -1138,6 +1138,100 @@ async fn test_managing_project_specific_settings(cx: &mut gpui::TestAppContext) 
 }
 
 #[gpui::test]
+async fn test_project_tasks_and_debug_scenarios_require_trust(cx: &mut gpui::TestAppContext) {
+    use project::trusted_worktrees::{self, DbTrustedPaths, PathTrust, TrustedWorktrees};
+
+    init_test(cx);
+    TaskStore::init(None);
+    cx.update(|cx| trusted_worktrees::init(DbTrustedPaths::default(), cx));
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/dir"),
+        json!({
+            ".zed": {
+                "settings.json": r#"{ "tab_size": 8 }"#,
+                "tasks.json": r#"[{ "label": "initial", "command": "echo initial", "hooks": ["create_worktree"] }]"#,
+                "debug.json": r#"[{ "label": "debug", "adapter": "Debugpy", "request": "launch" }]"#,
+            },
+            "file.rs": ""
+        }),
+    )
+    .await;
+
+    let project = Project::test_with_worktree_trust(fs.clone(), [path!("/dir").as_ref()], cx).await;
+    cx.run_until_parked();
+    let worktree_store = project.read_with(cx, |project, _| project.worktree_store());
+    let worktree_id = worktree_store.read_with(cx, |store, cx| {
+        store.worktrees().next().unwrap().read(cx).id()
+    });
+    let inventory = project.read_with(cx, |project, cx| {
+        project
+            .task_store()
+            .read(cx)
+            .task_inventory()
+            .unwrap()
+            .clone()
+    });
+    let contexts = TaskContexts {
+        active_worktree_context: Some((worktree_id, TaskContext::default())),
+        ..Default::default()
+    };
+    let hooks = HashSet::from_iter([task::TaskHook::CreateWorktree]);
+
+    assert!(inventory.read_with(cx, |inventory, _| {
+        inventory
+            .templates_with_hooks(&hooks, worktree_id)
+            .is_empty()
+    }));
+    let (_, scenarios) = inventory
+        .update(cx, |inventory, cx| {
+            inventory.list_debug_scenarios(&contexts, Vec::new(), Vec::new(), false, cx)
+        })
+        .await;
+    assert!(scenarios.is_empty());
+
+    fs.save(
+        path!("/dir/.zed/tasks.json").as_ref(),
+        &r#"[{ "label": "updated", "command": "echo updated", "hooks": ["create_worktree"] }]"#
+            .into(),
+        Default::default(),
+    )
+    .await
+    .unwrap();
+    cx.run_until_parked();
+    assert!(inventory.read_with(cx, |inventory, _| {
+        inventory
+            .templates_with_hooks(&hooks, worktree_id)
+            .is_empty()
+    }));
+
+    let trusted_worktrees = cx.update(|cx| TrustedWorktrees::try_get_global(cx).unwrap());
+    trusted_worktrees.update(cx, |store, cx| {
+        store.trust(
+            &worktree_store,
+            HashSet::from_iter([PathTrust::Worktree(worktree_id)]),
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    let templates = inventory.read_with(cx, |inventory, _| {
+        inventory.templates_with_hooks(&hooks, worktree_id)
+    });
+    assert_eq!(templates.len(), 1);
+    assert_eq!(templates[0].1.label, "updated");
+    assert_eq!(templates[0].1.command, "echo updated");
+    let (_, scenarios) = inventory
+        .update(cx, |inventory, cx| {
+            inventory.list_debug_scenarios(&contexts, Vec::new(), Vec::new(), false, cx)
+        })
+        .await;
+    assert_eq!(scenarios.len(), 1);
+    assert_eq!(scenarios[0].1.label, "debug");
+}
+
+#[gpui::test]
 async fn test_invalid_local_tasks_shows_toast_with_doc_link(cx: &mut gpui::TestAppContext) {
     init_test(cx);
     TaskStore::init(None);
@@ -1285,6 +1379,42 @@ async fn test_fallback_to_single_worktree_tasks(cx: &mut gpui::TestAppContext) {
             "echo /dir".to_string(),
         )]
     );
+}
+
+#[gpui::test]
+async fn test_single_file_worktree_is_not_an_lsp_workspace_folder(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/the-root"),
+        json!({
+            "main.py": "",
+            "pyproject.toml": ""
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs.clone(), [path!("/the-root/main.py").as_ref()], cx).await;
+    let language_registry = project.read_with(cx, |project, _| project.languages().clone());
+    let mut fake_python_servers = language_registry.register_fake_lsp(
+        "Python",
+        FakeLspAdapter {
+            name: "ty",
+            ..Default::default()
+        },
+    );
+    language_registry.add(python_lang(fs));
+
+    let (_buffer, _handle) = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer_with_lsp(path!("/the-root/main.py"), cx)
+        })
+        .await
+        .unwrap();
+    let fake_server = fake_python_servers.next().await.unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(fake_server.server.workspace_folders(), BTreeSet::new());
 }
 
 #[gpui::test]
@@ -1506,6 +1636,128 @@ async fn test_running_multiple_instances_of_a_single_server_in_one_worktree(
 }
 
 #[gpui::test]
+async fn test_save_as_notifies_language_servers_of_the_document_at_its_new_path(
+    cx: &mut gpui::TestAppContext,
+) {
+    init_test(cx);
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(path!("/dir"), json!({ "a.rs": "", "b.rs": "" }))
+        .await;
+    let project = Project::test(fs.clone(), [path!("/dir").as_ref()], cx).await;
+    let language_registry = project.read_with(cx, |project, _| project.languages().clone());
+    language_registry.add(rust_lang());
+    let mut fake_servers = language_registry.register_fake_lsp(
+        "Rust",
+        FakeLspAdapter {
+            capabilities: lsp::ServerCapabilities {
+                text_document_sync: Some(lsp::TextDocumentSyncCapability::Options(
+                    lsp::TextDocumentSyncOptions {
+                        save: Some(lsp::TextDocumentSyncSaveOptions::Supported(true)),
+                        ..lsp::TextDocumentSyncOptions::default()
+                    },
+                )),
+                ..lsp::ServerCapabilities::default()
+            },
+            ..FakeLspAdapter::default()
+        },
+    );
+
+    let (_running_buffer, _running_handle) = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer_with_lsp(path!("/dir/b.rs"), cx)
+        })
+        .await
+        .unwrap();
+    let fake_server = fake_servers.next().await.unwrap();
+    cx.executor().run_until_parked();
+
+    let notifications = Arc::new(Mutex::new(Vec::new()));
+    let file_name = |uri: &lsp::Uri| {
+        uri.to_file_path()
+            .ok()
+            .and_then(|path| Some(path.file_name()?.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| uri.to_string())
+    };
+    fake_server.handle_notification::<lsp::notification::DidOpenTextDocument, _>({
+        let notifications = notifications.clone();
+        move |params, _| {
+            notifications
+                .lock()
+                .push(format!("open {}", file_name(&params.text_document.uri)))
+        }
+    });
+    fake_server.handle_notification::<lsp::notification::DidSaveTextDocument, _>({
+        let notifications = notifications.clone();
+        move |params, _| {
+            notifications
+                .lock()
+                .push(format!("save {}", file_name(&params.text_document.uri)))
+        }
+    });
+    fake_server.handle_notification::<lsp::notification::DidCloseTextDocument, _>({
+        let notifications = notifications.clone();
+        move |params, _| {
+            notifications
+                .lock()
+                .push(format!("close {}", file_name(&params.text_document.uri)))
+        }
+    });
+
+    let worktree_id = project.read_with(cx, |project, cx| {
+        project.worktrees(cx).next().unwrap().read(cx).id()
+    });
+    let save_as = async |buffer: &Entity<Buffer>, path: &str, cx: &mut gpui::TestAppContext| {
+        project
+            .update(cx, |project, cx| {
+                project.save_buffer_as(
+                    buffer.clone(),
+                    ProjectPath {
+                        worktree_id,
+                        path: rel_path(path).into(),
+                    },
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        cx.executor().run_until_parked();
+        std::mem::take(&mut *notifications.lock())
+    };
+
+    // An untitled buffer only becomes a document of the server by being saved, so the server
+    // must learn about the document before its save.
+    let untitled_buffer = project.update(cx, |project, cx| {
+        project.create_local_buffer("fn main() {}", Some(rust_lang()), true, cx)
+    });
+    let _untitled_handle = project.update(cx, |project, cx| {
+        project.register_buffer_with_language_servers(&untitled_buffer, cx)
+    });
+    cx.executor().run_until_parked();
+    assert_eq!(
+        save_as(&untitled_buffer, "new.rs", cx).await,
+        vec!["open new.rs".to_string(), "save new.rs".to_string()],
+    );
+
+    let (renamed_buffer, _renamed_handle) = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer_with_lsp(path!("/dir/a.rs"), cx)
+        })
+        .await
+        .unwrap();
+    cx.executor().run_until_parked();
+    notifications.lock().clear();
+    assert_eq!(
+        save_as(&renamed_buffer, "renamed.rs", cx).await,
+        vec![
+            "close a.rs".to_string(),
+            "open renamed.rs".to_string(),
+            "save renamed.rs".to_string(),
+        ],
+    );
+}
+
+#[gpui::test]
 async fn test_managing_language_servers(cx: &mut gpui::TestAppContext) {
     init_test(cx);
 
@@ -1707,19 +1959,20 @@ async fn test_managing_language_servers(cx: &mut gpui::TestAppContext) {
         )
     );
 
-    // Save notifications are reported to all servers.
-    project
-        .update(cx, |project, cx| project.save_buffer(toml_buffer, cx))
-        .await
-        .unwrap();
+    // Static save capabilities only cover the documents a server was opened with, so saving
+    // the TOML buffer notifies no server: the next save notifications are for their own buffers.
+    for buffer in [toml_buffer, rust_buffer2.clone(), json_buffer.clone()] {
+        project
+            .update(cx, |project, cx| project.save_buffer(buffer, cx))
+            .await
+            .unwrap();
+    }
     assert_eq!(
         fake_rust_server
             .receive_notification::<lsp::notification::DidSaveTextDocument>()
             .await
             .text_document,
-        lsp::TextDocumentIdentifier::new(
-            lsp::Uri::from_file_path(path!("/dir/Cargo.toml")).unwrap()
-        )
+        lsp::TextDocumentIdentifier::new(lsp::Uri::from_file_path(path!("/dir/test2.rs")).unwrap())
     );
     assert_eq!(
         fake_json_server
@@ -1727,7 +1980,7 @@ async fn test_managing_language_servers(cx: &mut gpui::TestAppContext) {
             .await
             .text_document,
         lsp::TextDocumentIdentifier::new(
-            lsp::Uri::from_file_path(path!("/dir/Cargo.toml")).unwrap()
+            lsp::Uri::from_file_path(path!("/dir/package.json")).unwrap()
         )
     );
 
@@ -7882,6 +8135,88 @@ async fn test_range_formatting_prefers_range_capable_current_server(cx: &mut gpu
     );
 }
 
+#[gpui::test]
+async fn test_full_buffer_formatting_edit_preserves_unchanged_anchors(
+    cx: &mut gpui::TestAppContext,
+) {
+    init_test(cx);
+    cx.update(|cx| {
+        SettingsStore::update_global(cx, |store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.project.all_languages.defaults.formatter = Some(FormatterList::Single(
+                    Formatter::LanguageServer(settings::LanguageServerFormatterSpecifier::Current),
+                ));
+            });
+        });
+    });
+
+    let initial_text = "fn main() {\n    println!(\"🙂\");  \n}\n";
+    let formatted_text = "fn main() {\n    println!(\"🙂\");\n}\n";
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(path!("/dir"), json!({ "main.rs": initial_text }))
+        .await;
+
+    let project = Project::test(fs, [path!("/dir").as_ref()], cx).await;
+    let language_registry = project.read_with(cx, |project, _| project.languages().clone());
+    language_registry.add(rust_lang());
+    let mut fake_language_servers = language_registry.register_fake_lsp(
+        "Rust",
+        FakeLspAdapter {
+            capabilities: lsp::ServerCapabilities {
+                document_formatting_provider: Some(lsp::OneOf::Left(true)),
+                ..lsp::ServerCapabilities::default()
+            },
+            ..FakeLspAdapter::default()
+        },
+    );
+
+    let (buffer, _handle) = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer_with_lsp(path!("/dir/main.rs"), cx)
+        })
+        .await
+        .unwrap();
+    let fake_server = fake_language_servers.next().await.unwrap();
+    cx.executor().run_until_parked();
+
+    let _format_requests = fake_server.set_request_handler::<lsp::request::Formatting, _, _>({
+        let formatted_text = formatted_text.to_string();
+        move |_, _| {
+            let formatted_text = formatted_text.clone();
+            async move {
+                Ok(Some(vec![lsp::TextEdit {
+                    range: lsp::Range::new(lsp::Position::new(0, 0), lsp::Position::new(3, 0)),
+                    new_text: formatted_text,
+                }]))
+            }
+        }
+    });
+    let unchanged_anchor = buffer.read_with(cx, |buffer, _| {
+        buffer.anchor_before(initial_text.find("println!").unwrap())
+    });
+
+    project
+        .update(cx, |project, cx| {
+            project.format(
+                HashSet::from_iter([buffer.clone()]),
+                project::lsp_store::LspFormatTarget::Buffers,
+                false,
+                project::lsp_store::FormatTrigger::Manual,
+                cx,
+            )
+        })
+        .await
+        .unwrap();
+
+    buffer.read_with(cx, |buffer, _| {
+        assert_eq!(buffer.text(), formatted_text);
+        assert_eq!(
+            unchanged_anchor.to_offset(buffer),
+            formatted_text.find("println!").unwrap()
+        );
+    });
+}
+
 #[gpui::test(iterations = 10)]
 async fn test_apply_code_actions_with_commands(cx: &mut gpui::TestAppContext) {
     init_test(cx);
@@ -12365,15 +12700,15 @@ async fn test_visibility_for_paths_in_gitignored_dirs(cx: &mut gpui::TestAppCont
         let file_in_ignored_dir = PathBuf::from(path!("/dir/.checkouts/worktrees/foo/README.md"));
 
         assert_eq!(
-            project.visibility_for_paths(std::slice::from_ref(&root), true, cx),
+            project.visibility_for_paths(std::slice::from_ref(&root.as_path()), true, cx),
             Some(true)
         );
         assert_eq!(
-            project.visibility_for_paths(std::slice::from_ref(&file), true, cx),
+            project.visibility_for_paths(std::slice::from_ref(&file.as_path()), true, cx),
             Some(true)
         );
         assert_eq!(
-            project.visibility_for_subpaths(std::slice::from_ref(&file), cx),
+            project.visibility_for_subpaths(std::slice::from_ref(&file.as_path()), cx),
             Some(true)
         );
 
@@ -12382,17 +12717,17 @@ async fn test_visibility_for_paths_in_gitignored_dirs(cx: &mut gpui::TestAppCont
         // opening an unrelated path.
         for path in [&ignored_dir, &file_in_ignored_dir] {
             assert_eq!(
-                project.visibility_for_paths(std::slice::from_ref(path), true, cx),
+                project.visibility_for_paths(std::slice::from_ref(&path.as_path()), true, cx),
                 None,
                 "{path:?} should not be considered contained"
             );
             assert_eq!(
-                project.visibility_for_paths(std::slice::from_ref(path), false, cx),
+                project.visibility_for_paths(std::slice::from_ref(&path.as_path()), false, cx),
                 None,
                 "{path:?} should not be considered contained"
             );
             assert_eq!(
-                project.visibility_for_subpaths(std::slice::from_ref(path), cx),
+                project.visibility_for_subpaths(std::slice::from_ref(&path.as_path()), cx),
                 None,
                 "{path:?} should not be considered a contained subpath"
             );
@@ -19593,6 +19928,22 @@ async fn test_undo_encoding_change(cx: &mut gpui::TestAppContext) {
         assert_ne!(buffer.text(), "Hi");
         assert!(!buffer.is_dirty());
     });
+
+    let thai = "สวัสดีชาวโลกนี่คือข้อความทดสอบภาษาไทย";
+    fs.insert_file(
+        path!("/dir/test.txt"),
+        thai.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+    )
+    .await;
+    cx.run_until_parked();
+    assert_eq!(buffer.read_with(cx, |buffer, _| buffer.text()), thai);
+    buffer
+        .update(cx, |buffer, cx| {
+            buffer.reload_with_encoding(encoding_rs::UTF_16LE, cx)
+        })
+        .await
+        .unwrap();
+    assert_eq!(buffer.read_with(cx, |buffer, _| buffer.text()), thai);
 }
 
 #[gpui::test]
@@ -20446,10 +20797,10 @@ async fn test_read_only_files_setting(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |settings| {
-                settings.project.worktree.read_only_files = Some(vec![
-                    "**/generated/**".to_string(),
+                settings.project.worktree.read_only_files = Some(SplicingVec::from(vec![
                     "**/*.gen.rs".to_string(),
-                ]);
+                    "**/generated/**".to_string(),
+                ]));
             });
         });
     });
@@ -20515,6 +20866,56 @@ async fn test_read_only_files_setting(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_read_only_files_splice_project_settings(cx: &mut gpui::TestAppContext) {
+    init_test(cx);
+    cx.update(|cx| {
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.project.worktree.read_only_files = Some(SplicingVec::from(vec![
+                    SplicingVec::REST.to_string(),
+                    "**/*.lock".to_string(),
+                ]));
+            });
+        });
+    });
+
+    let fs = FakeFs::new(cx.background_executor.clone());
+    fs.insert_tree(
+        path!("/root"),
+        json!({
+            ".zed": {
+                "settings.json": r#"{"read_only_files": ["**/generated/**", "..."]}"#,
+            },
+            "generated": {"schema.rs": ""},
+            "src": {"main.rs": ""},
+            "yarn.lock": "",
+        }),
+    )
+    .await;
+    let project = Project::test(fs, [path!("/root").as_ref()], cx).await;
+    cx.executor().run_until_parked();
+
+    for (relative_path, expected_read_only) in [
+        ("generated/schema.rs", true),
+        ("src/main.rs", false),
+        ("yarn.lock", true),
+    ] {
+        let full_path = Path::new(path!("/root")).join(relative_path);
+        let result = project
+            .update(cx, |project, cx| project.open_local_buffer(&full_path, cx))
+            .await;
+        match result {
+            Ok(buffer) => assert_eq!(
+                buffer.read_with(cx, |buffer, _| buffer.read_only()),
+                expected_read_only,
+                "{relative_path}"
+            ),
+            Err(error) => panic!("could not open {relative_path}: {error}"),
+        }
+    }
+}
+
+#[gpui::test]
 async fn test_read_only_files_empty_setting(cx: &mut gpui::TestAppContext) {
     init_test(cx);
 
@@ -20522,7 +20923,7 @@ async fn test_read_only_files_empty_setting(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |settings| {
-                settings.project.worktree.read_only_files = Some(vec![]);
+                settings.project.worktree.read_only_files = Some(SplicingVec::from(vec![]));
             });
         });
     });
@@ -20619,10 +21020,10 @@ async fn test_read_only_files_with_lock_files(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |settings| {
-                settings.project.worktree.read_only_files = Some(vec![
+                settings.project.worktree.read_only_files = Some(SplicingVec::from(vec![
                     "**/*.lock".to_string(),
                     "**/package-lock.json".to_string(),
-                ]);
+                ]));
             });
         });
     });

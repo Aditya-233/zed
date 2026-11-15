@@ -14,7 +14,7 @@ use project::DisableAiSettings;
 use settings::Settings;
 use sum_tree::Bias;
 use text::SelectionGoal;
-use util::{RangeExt, debug_panic, post_inc};
+use util::{RangeExt, debug_panic};
 
 use super::{EditorElement, EditorLayout, LineNumberLayout, PositionMap, SplitSide};
 use crate::{
@@ -505,17 +505,7 @@ impl EditorElement {
                         && editor.read(cx).enable_mouse_wheel_zoom
                         && EditorSettings::get_global(cx).mouse_wheel_zoom
                     {
-                        let delta_y = match event.delta {
-                            ScrollDelta::Pixels(pixels) => pixels.y.into(),
-                            ScrollDelta::Lines(lines) => lines.y,
-                        };
-
-                        if delta_y > 0.0 {
-                            theme_settings::increase_buffer_font_size(cx);
-                        } else if delta_y < 0.0 {
-                            theme_settings::decrease_buffer_font_size(cx);
-                        }
-
+                        theme_settings::adjust_buffer_font_size_for_scroll(event.delta, cx);
                         cx.stop_propagation();
                     } else {
                         let scroll_sensitivity = {
@@ -610,6 +600,16 @@ impl EditorElement {
         } else if gutter_hitbox.is_hovered(window) {
             click_count = 3; // Simulate triple-click when clicking the gutter to select lines
         } else if !text_hitbox.is_hovered(window) {
+            return;
+        }
+
+        if !event.modifiers.modified()
+            && text_hitbox.is_hovered(window)
+            && editor.hovered_inlay_hint_command().is_some_and(|command| {
+                command.contains_point(&position_map.snapshot, point_for_position)
+            })
+        {
+            cx.stop_propagation();
             return;
         }
 
@@ -943,8 +943,6 @@ impl EditorElement {
 
         if let Some(mouse_position) = event.mouse_position()
             && !pending_nonempty_selections
-            && hovered_link_modifier
-            && mouse_down_hovered_link_modifier
             && text_hitbox.is_hovered(window)
             && !matches!(
                 editor.selection_drag_state,
@@ -952,10 +950,27 @@ impl EditorElement {
             )
         {
             let point = position_map.point_for_position(mouse_position);
-            editor.handle_click_hovered_link(point, event.modifiers(), window, cx);
-            editor.selection_drag_state = SelectionDragState::None;
+            if let ClickEvent::Mouse(mouse_event) = event
+                && mouse_event.up.click_count == 1
+                && !mouse_event.down.modifiers.modified()
+                && !mouse_event.up.modifiers.modified()
+                && editor.activate_hovered_inlay_hint_command(
+                    &position_map.snapshot,
+                    position_map.point_for_position(mouse_event.down.position),
+                    point,
+                    cx,
+                )
+            {
+                editor.selection_drag_state = SelectionDragState::None;
+                cx.stop_propagation();
+                return;
+            }
 
-            cx.stop_propagation();
+            if hovered_link_modifier && mouse_down_hovered_link_modifier {
+                editor.handle_click_hovered_link(point, event.modifiers(), window, cx);
+                editor.selection_drag_state = SelectionDragState::None;
+                cx.stop_propagation();
+            }
         }
     }
 
@@ -1065,7 +1080,7 @@ impl EditorElement {
                     );
                     if mouse_down_time.elapsed() >= drag_and_drop_delay {
                         let drop_cursor = Selection {
-                            id: post_inc(&mut editor.selections.next_selection_id()),
+                            id: editor.selections.next_selection_id(),
                             start: drop_anchor,
                             end: drop_anchor,
                             reversed: false,

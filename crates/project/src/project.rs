@@ -159,8 +159,9 @@ pub use buffer_store::ProjectTransaction;
 pub use lsp_command::{CallHierarchyItem, IncomingCall, OutgoingCall};
 pub use lsp_store::{
     DiagnosticSummary, InvalidationStrategy, LanguageServerLogType, LanguageServerProgress,
-    LanguageServerPromptRequest, LanguageServerStatus, LanguageServerToQuery, LspStore,
-    LspStoreEvent, ProgressToken, SERVER_PROGRESS_THROTTLE_TIMEOUT,
+    LanguageServerPromptRequest, LanguageServerShowDocumentRequest, LanguageServerStatus,
+    LanguageServerToQuery, LspStore, LspStoreEvent, ProgressToken,
+    SERVER_PROGRESS_THROTTLE_TIMEOUT,
 };
 pub use toolchain_store::{ToolchainStore, Toolchains};
 const MAX_PROJECT_SEARCH_HISTORY_SIZE: usize = 500;
@@ -353,6 +354,7 @@ pub enum Event {
         notification_id: SharedString,
     },
     LanguageServerPrompt(LanguageServerPromptRequest),
+    LanguageServerShowDocument(LanguageServerShowDocumentRequest),
     LanguageNotFound(Entity<Buffer>),
     ActiveEntryChanged(Option<ProjectEntryId>),
     ActivateProjectPanel,
@@ -507,7 +509,7 @@ impl InlayId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InlayHint {
     pub position: language::Anchor,
     pub label: InlayHintLabel,
@@ -841,17 +843,18 @@ impl InlayHint {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InlayHintLabel {
     String(String),
     LabelParts(Vec<InlayHintLabelPart>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InlayHintLabelPart {
     pub value: String,
     pub tooltip: Option<InlayHintLabelPartTooltip>,
     pub location: Option<(LanguageServerId, lsp::Location)>,
+    pub command: Option<(LanguageServerId, lsp::Command)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1038,11 +1041,22 @@ impl DirectoryLister {
         project
             .visible_worktrees(cx)
             .next()
-            .map(|worktree| worktree.read(cx).abs_path().to_string_lossy().into_owned())
+            .map(|worktree| {
+                let worktree = worktree.read(cx);
+                let abs_path = worktree.abs_path();
+                let directory = if worktree.root_entry().is_some_and(|entry| entry.is_file()) {
+                    path_style.parent(&abs_path).unwrap_or(&abs_path)
+                } else {
+                    &abs_path
+                };
+                directory.to_string_lossy().into_owned()
+            })
             .or_else(|| std::env::home_dir().map(|dir| dir.to_string_lossy().into_owned()))
-            .map(|mut s| {
-                s.push_str(path_style.primary_separator());
-                s
+            .map(|mut query| {
+                if !query.ends_with(path_style.separators_ch()) {
+                    query.push_str(path_style.primary_separator());
+                }
+                query
             })
             .unwrap_or_else(|| {
                 if path_style.is_windows() {
@@ -2191,15 +2205,14 @@ impl Project {
     #[inline]
     pub fn visibility_for_paths(
         &self,
-        paths: &[PathBuf],
+        paths: &[impl AsRef<Path>],
         exclude_sub_dirs: bool,
         cx: &App,
     ) -> Option<bool> {
         paths
             .iter()
-            .map(|path| self.visibility_for_path(path, exclude_sub_dirs, cx))
+            .filter_map(|path| self.visibility_for_path(path.as_ref(), exclude_sub_dirs, cx))
             .max()
-            .flatten()
     }
 
     pub fn visibility_for_path(
@@ -2233,12 +2246,11 @@ impl Project {
             .max()
     }
 
-    pub fn visibility_for_subpaths(&self, paths: &[PathBuf], cx: &App) -> Option<bool> {
+    pub fn visibility_for_subpaths(&self, paths: &[impl AsRef<Path>], cx: &App) -> Option<bool> {
         paths
             .iter()
-            .map(|path| self.visibility_for_subpath(path, cx))
+            .filter_map(|path| self.visibility_for_subpath(path.as_ref(), cx))
             .max()
-            .flatten()
     }
 
     fn visibility_for_subpath(&self, path: &Path, cx: &App) -> Option<bool> {
@@ -3336,6 +3348,9 @@ impl Project {
             }
             LspStoreEvent::LanguageServerPrompt(prompt) => {
                 cx.emit(Event::LanguageServerPrompt(prompt.clone()))
+            }
+            LspStoreEvent::LanguageServerShowDocument(request) => {
+                cx.emit(Event::LanguageServerShowDocument(request.clone()))
             }
             LspStoreEvent::DiskBasedDiagnosticsStarted { language_server_id } => {
                 cx.emit(Event::DiskBasedDiagnosticsStarted {

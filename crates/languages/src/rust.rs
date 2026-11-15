@@ -3,10 +3,11 @@ use async_trait::async_trait;
 use collections::HashMap;
 use futures::StreamExt;
 use futures::lock::OwnedMutexGuard;
+use github_releases::{
+    AssetKind, GitHubLspBinaryVersion, GithubBinaryMetadata, download_server_binary,
+    latest_github_release,
+};
 use gpui::{App, AppContext, AsyncApp, Entity, SharedString, Task};
-use http_client::github::AssetKind;
-use http_client::github::{GitHubLspBinaryVersion, latest_github_release};
-use http_client::github_download::{GithubBinaryMetadata, download_server_binary};
 pub use language::*;
 use lsp::{InitializeParams, LanguageServerBinary, LanguageServerBinaryOptions};
 use project::lsp_store::lsp_ext_command;
@@ -30,6 +31,7 @@ use task::{TaskTemplate, TaskTemplates, TaskVariables, VariableName};
 use util::command::{Stdio, new_command};
 use util::fs::{make_file_executable, remove_matching};
 use util::merge_json_value_into;
+use util::paths::PathStyle;
 use util::rel_path::RelPath;
 use util::{ResultExt, maybe};
 
@@ -727,6 +729,7 @@ impl LspAdapter for RustLspAdapter {
         &self,
         command_name: &str,
         arguments: &[serde_json::Value],
+        _path_style: PathStyle,
     ) -> Option<ClientCommand> {
         match command_name {
             "rust-analyzer.showReferences" => Some(ClientCommand::ShowLocations),
@@ -891,7 +894,8 @@ impl LspInstaller for RustLspAdapter {
             }
 
             download_server_binary(
-                &*delegate.http_client(),
+                delegate.background_executor(),
+                delegate.http_client(),
                 &url,
                 expected_digest.as_deref(),
                 &destination_path,
@@ -1842,8 +1846,7 @@ mod tests {
                 vec![
                     (10..13, HighlightId::TABSTOP_INSERT_ID),
                     (16..19, HighlightId::TABSTOP_INSERT_ID),
-                    (0..7, HighlightId::new(2)),
-                    (7..8, HighlightId::new(2)),
+                    (0..8, HighlightId::new(2)),
                 ],
             ))
         );
@@ -1870,8 +1873,7 @@ mod tests {
                 0..4,
                 vec![
                     (5..9, HighlightId::TABSTOP_REPLACE_ID),
-                    (0..3, HighlightId::new(2)),
-                    (3..4, HighlightId::new(2)),
+                    (0..4, HighlightId::new(2)),
                 ],
             ))
         );
@@ -1956,8 +1958,7 @@ mod tests {
                 vec![
                     (15..20, HighlightId::TABSTOP_REPLACE_ID),
                     (16..19, HighlightId::TABSTOP_INSERT_ID),
-                    (0..13, HighlightId::new(2)),
-                    (13..14, HighlightId::new(2)),
+                    (0..14, HighlightId::new(2)),
                 ],
             ))
         );
