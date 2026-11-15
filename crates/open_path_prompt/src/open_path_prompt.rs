@@ -734,10 +734,17 @@ impl PickerDelegate for OpenPathDelegate {
                     if parent_path == &self.prompt_root && candidate.path.string.is_empty() {
                         PathBuf::from(&self.prompt_root)
                     } else {
-                        self.path_style.normalize_separators(self.path_style.join(
-                            Path::new(self.lister.resolve_tilde(parent_path, cx).as_ref()),
-                            &candidate.path.string,
-                        ))
+                        let Some(confirmed_path) = self
+                            .path_style
+                            .join_path_preserving_components(
+                                Path::new(self.lister.resolve_tilde(parent_path, cx).as_ref()),
+                                &candidate.path.string,
+                            )
+                            .log_err()
+                        else {
+                            return;
+                        };
+                        confirmed_path
                     };
                 if let Some(on_confirm) = self.on_confirm.take() {
                     on_confirm(Some(OpenPathPromptResult {

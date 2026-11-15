@@ -1376,10 +1376,10 @@ async fn test_ignored_root_with_file_inclusions(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |settings| {
-                settings.project.worktree.file_scan_inclusions = Some(vec![
+                settings.project.worktree.file_scan_inclusions = Some(SplicingVec::from(vec![
                     "height_demo/**/hi_bonjour".to_string(),
                     "**/height_1".to_string(),
-                ]);
+                ]));
             });
         })
     });
@@ -1470,7 +1470,8 @@ async fn test_ignored_root_with_file_inclusions_repro(cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.update_global::<SettingsStore, _>(|store, cx| {
             store.update_user_settings(cx, |settings| {
-                settings.project.worktree.file_scan_inclusions = Some(vec!["**/.env".to_string()]);
+                settings.project.worktree.file_scan_inclusions =
+                    Some(SplicingVec::from(vec!["**/.env".to_string()]));
             });
         })
     });
