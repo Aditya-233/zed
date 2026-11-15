@@ -4405,7 +4405,7 @@ dependencies = [
  "async-compression",
  "async-fs",
  "async-tar",
- "futures 0.3.34",
+ "futures",
  "gpui",
  "http_client",
  "log",

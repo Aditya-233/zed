@@ -1518,30 +1518,6 @@ impl DisplaySnapshot {
         self.diagnostics_max_severity.into_lsp().is_some()
     }
 
-    fn diagnostic_severity_is_visible(&self, severity: lsp::DiagnosticSeverity) -> bool {
-        self.diagnostics_max_severity
-            .into_lsp()
-            .is_some_and(|max_severity| severity <= max_severity)
-    }
-
-    pub(crate) fn diagnostic_underline_style(
-        &self,
-        severity: lsp::DiagnosticSeverity,
-        underline: bool,
-        is_unnecessary: bool,
-        editor_style: &EditorStyle,
-    ) -> Option<UnderlineStyle> {
-        (underline
-            && editor_style.show_underlines
-            && self.diagnostic_severity_is_visible(severity)
-            && !(is_unnecessary && severity > lsp::DiagnosticSeverity::WARNING))
-            .then(|| UnderlineStyle {
-                color: Some(diagnostic_style(severity, &editor_style.status)),
-                thickness: 1.0.into(),
-                wavy: true,
-            })
-    }
-
     pub fn wrap_snapshot(&self) -> &WrapSnapshot {
         &self.block_snapshot.wrap_snapshot
     }

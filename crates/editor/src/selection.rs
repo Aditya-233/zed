@@ -88,12 +88,7 @@ impl Editor {
         let already_deferred = self.defer_selection_effects;
         self.defer_selection_effects = true;
         let result = update(self, window, cx);
-        if !already_deferred {
-            self.defer_selection_effects = false;
-            if let Some(state) = self.deferred_selection_effects_state.take() {
-                self.apply_selection_effects(state, window, cx);
-            }
-        }
+        self.finish_deferred_selection_effects(already_deferred, window, cx);
         result
     }
 

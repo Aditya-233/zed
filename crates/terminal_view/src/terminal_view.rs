@@ -2241,7 +2241,7 @@ mod tests {
 
         let zoom_scroll =
             |position: gpui::Point<Pixels>, lines: f32, cx: &mut VisualTestContext| {
-                let modifiers = cx.read(|cx| gpui::Modifiers::secondary_key(cx));
+                let modifiers = gpui::Modifiers::secondary_key();
 
                 cx.simulate_event(ScrollWheelEvent {
                     position,
