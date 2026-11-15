@@ -26,7 +26,7 @@ use project::{
     worktree_store::WorktreeStore,
 };
 
-use settings::{ModalWidthContent, SeedQuerySetting, Settings, SettingsLocation, SettingsStore};
+use settings::{ModalWidthContent, Settings, SettingsLocation, SettingsStore};
 use std::{
     borrow::Cow,
     cmp, mem,
@@ -371,6 +371,7 @@ pub struct FileFinderDelegate {
     cancel_flag: Arc<AtomicBool>,
     search_in_flight: Arc<AtomicBool>,
     history_items: Vec<FoundPath>,
+    history_refresh: Task<()>,
     separate_history: bool,
     first_update: bool,
     focus_handle: FocusHandle,
@@ -882,6 +883,27 @@ impl FoundPath {
     fn new(project: ProjectPath, absolute: PathBuf) -> Self {
         Self { project, absolute }
     }
+
+    fn is_file(&self, project: &Project, cx: &App) -> Task<bool> {
+        if let Some(entry) = project.entry_for_path(&self.project, cx) {
+            return Task::ready(entry.is_file());
+        }
+        if project.is_local() {
+            let fs = project.fs().clone();
+            let path = self.absolute.clone();
+            cx.background_spawn(async move { fs.is_file(&path).await })
+        } else if project.is_via_remote_server() {
+            let Some(path) = self.absolute.to_str() else {
+                return Task::ready(false);
+            };
+            let resolve_path = project.resolve_abs_path(path, cx);
+            cx.background_spawn(
+                async move { resolve_path.await.is_some_and(|path| path.is_file()) },
+            )
+        } else {
+            Task::ready(true)
+        }
+    }
 }
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
@@ -1024,6 +1046,7 @@ impl FileFinderDelegate {
             cancel_flag: Arc::new(AtomicBool::new(false)),
             search_in_flight: Arc::new(AtomicBool::new(false)),
             history_items,
+            history_refresh: Task::ready(()),
             separate_history,
             first_update: true,
             focus_handle: cx.focus_handle(),

@@ -324,7 +324,7 @@ impl TestAppContext {
     }
 
     /// Returns the TestPlatform
-    pub fn test_platform(&self) -> &Rc<TestPlatform> {
+    pub(crate) fn test_platform(&self) -> &Rc<TestPlatform> {
         &self.test_platform
     }
 
