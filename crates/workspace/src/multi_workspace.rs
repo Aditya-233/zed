@@ -24,7 +24,7 @@ use ui::{ContextMenu, right_click_menu};
 const SIDEBAR_RESIZE_HANDLE_SIZE: Pixels = px(6.0);
 use crate::{
     CloseIntent, CloseWindow, DockPosition, Event as WorkspaceEvent, Item, ModalView, OpenMode,
-    Panel, Workspace, WorkspaceId, client_side_decorations,
+    OpenOptions, OpenVisible, Panel, Workspace, WorkspaceId, client_side_decorations,
     persistence::model::MultiWorkspaceState,
 };
 
@@ -950,13 +950,19 @@ impl MultiWorkspace {
         }
 
         let workspaces = self.workspaces_for_project_group(group_key, cx);
+        if workspaces.is_empty() {
+            let previous_group_count = self.project_groups.len();
+            self.project_groups.retain(|group| group.key != *group_key);
+            if self.project_groups.len() != previous_group_count {
+                cx.emit(MultiWorkspaceEvent::ProjectGroupsChanged);
+                self.serialize(cx);
+                cx.notify();
+                return Task::ready(Ok(true));
+            }
+            return Task::ready(Ok(false));
+        }
 
-        let task = self.remove(workspaces, RemovalIntent::CloseProject, window, cx);
-
-        self.project_groups.retain(|group| group.key != *group_key);
-        cx.emit(MultiWorkspaceEvent::ProjectGroupsChanged);
-
-        task
+        self.remove(workspaces, RemovalIntent::CloseProject, window, cx)
     }
 
     /// Returns the nearest retained workspace outside the project group at
@@ -1709,6 +1715,18 @@ impl MultiWorkspace {
                 let mut removed_any = false;
                 let displayed_workspace = this.workspace().clone();
 
+                // wait for should_continue to be true before removing project groups
+                if intent == RemovalIntent::CloseProject {
+                    let workspace_to_delete_keys = workspaces
+                        .iter()
+                        .map(|workspace| workspace.read(cx).project_group_key(cx))
+                        .collect::<Vec<_>>();
+
+                    this.project_groups
+                        .retain(|group| !workspace_to_delete_keys.contains(&group.key));
+                    cx.emit(MultiWorkspaceEvent::ProjectGroupsChanged);
+                }
+
                 for workspace in &workspaces {
                     if *workspace == displayed_workspace {
                         continue;
@@ -1862,7 +1880,35 @@ impl MultiWorkspace {
             })
         } else {
             let workspace = self.workspace().clone();
-            cx.spawn_in(window, async move |_this, cx| {
+            let project = workspace.read(cx).project().read(cx);
+            let reuse_workspace = open_mode != OpenMode::NewWindow
+                && project.is_local()
+                && project.visibility_for_paths(&paths, true, cx).is_some();
+            cx.spawn_in(window, async move |_, cx| {
+                if reuse_workspace {
+                    let results = workspace
+                        .update_in(cx, |workspace, window, cx| {
+                            workspace.open_paths(
+                                paths,
+                                OpenOptions {
+                                    visible: Some(OpenVisible::All),
+                                    ..OpenOptions::default()
+                                },
+                                None,
+                                window,
+                                cx,
+                            )
+                        })?
+                        .await;
+                    workspace.update(cx, |workspace, cx| {
+                        for result in results.into_iter().flatten() {
+                            if let Err(error) = result {
+                                workspace.show_error(error, cx);
+                            }
+                        }
+                    });
+                    return Ok(workspace);
+                }
                 let should_continue = workspace
                     .update_in(cx, |workspace, window, cx| {
                         workspace.prepare_to_close(crate::CloseIntent::ReplaceWindow, window, cx)
@@ -1871,9 +1917,18 @@ impl MultiWorkspace {
                 if should_continue {
                     workspace
                         .update_in(cx, |workspace, window, cx| {
-                            workspace.open_workspace_for_paths(open_mode, paths, window, cx)
+                            Workspace::new_local(
+                                paths,
+                                workspace.app_state().clone(),
+                                window.window_handle().downcast(),
+                                None,
+                                None,
+                                open_mode,
+                                cx,
+                            )
                         })?
                         .await
+                        .map(|result| result.workspace)
                 } else {
                     Ok(workspace)
                 }

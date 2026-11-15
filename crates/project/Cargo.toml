@@ -48,14 +48,16 @@ dap.workspace = true
 encoding_rs.workspace = true
 extension.workspace = true
 fancy-regex.workspace = true
+file_content.workspace = true
 fs.workspace = true
 futures.workspace = true
 fuzzy.workspace = true
 fuzzy_nucleo.workspace = true
 git.workspace = true
+github_releases.workspace = true
 globset.workspace = true
 gpui.workspace = true
-http_client = { workspace = true, features = ["github-download"] }
+http_client.workspace = true
 image.workspace = true
 indexmap.workspace = true
 itertools.workspace = true

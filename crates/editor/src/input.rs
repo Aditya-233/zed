@@ -79,6 +79,7 @@ impl Editor {
         self.unfold_buffers_with_selections(cx);
 
         let selections = self.selections.all_adjusted(&self.display_snapshot(cx));
+        let has_multiple_selections = selections.len() > 1;
         let mut bracket_inserted = false;
         let mut edits = Vec::new();
         let mut linked_edits = LinkedEdits::new();
@@ -416,11 +417,18 @@ impl Editor {
             let initial_buffer_versions =
                 jsx_tag_auto_close::construct_initial_buffer_versions_map(this, &edits, cx);
 
+            let autoindent_mode = if has_multiple_selections {
+                this.autoindent_mode
+                    .clone()
+                    .map(|_| AutoindentMode::PreserveSingleLine)
+            } else {
+                this.autoindent_mode.clone()
+            };
             this.buffer.update(cx, |buffer, cx| {
                 if has_adjacent_edits {
-                    buffer.edit_non_coalesce(edits, this.autoindent_mode.clone(), cx);
+                    buffer.edit_non_coalesce(edits, autoindent_mode, cx);
                 } else {
-                    buffer.edit(edits, this.autoindent_mode.clone(), cx);
+                    buffer.edit(edits, autoindent_mode, cx);
                 }
             });
             linked_edits.apply(cx);
@@ -500,11 +508,12 @@ impl Editor {
                 this.show_edit_predictions_in_menu() || !had_active_edit_prediction;
             if this.hard_wrap.is_some() {
                 let latest: Range<Point> = this.selections.newest(&map).range();
+                // Reuse the post-edit snapshot captured in `map` above; the buffer
+                // is not mutated between there and here (only selections move), so a
+                // fresh `buffer().snapshot(cx)` would be redundant.
                 if latest.is_empty()
-                    && this
-                        .buffer()
-                        .read(cx)
-                        .snapshot(cx)
+                    && map
+                        .buffer_snapshot()
                         .line_len(MultiBufferRow(latest.start.row))
                         == latest.start.column
                 {

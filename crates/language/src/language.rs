@@ -10,7 +10,6 @@ mod available_languages;
 mod buffer;
 mod diagnostic;
 mod diagnostic_set;
-mod file_content;
 mod language_registry;
 
 pub mod language_settings;
@@ -39,7 +38,7 @@ use collections::{HashMap, HashSet};
 use futures::Future;
 use futures::future::LocalBoxFuture;
 use futures::lock::OwnedMutexGuard;
-use gpui::{App, AsyncApp, Entity, EntityId};
+use gpui::{App, AsyncApp, BackgroundExecutor, Entity, EntityId, SharedString};
 use http_client::HttpClient;
 
 pub use language_core::{
@@ -62,7 +61,8 @@ pub use language_core::{
     serialize_regex,
 };
 pub use language_registry::{
-    LanguageLoader, LanguageName, LanguageServerStatusUpdate, LoadedLanguage, ServerHealth,
+    ExtensionLanguagesUpdateOutcome, LanguageLoader, LanguageName, LanguageRegistration,
+    LanguageRegistrationStatus, LanguageServerStatusUpdate, LoadedLanguage, ServerHealth,
 };
 use lsp::{
     CodeActionKind, InitializeParams, LanguageServerBinary, LanguageServerBinaryOptions, Uri,
@@ -99,6 +99,7 @@ pub use toolchain::{
     ToolchainMetadata, ToolchainScope,
 };
 use tree_sitter::{self, QueryCursor, WasmStore, wasmtime};
+use util::paths::PathStyle;
 use util::rel_path::RelPath;
 
 pub use available_languages::AvailableLanguage;
@@ -108,9 +109,6 @@ pub use diagnostic::{
     Diagnostic, DiagnosticMessage, DiagnosticSourceKind, RelatedInformation, RelatedLocation,
 };
 pub use diagnostic_set::{DiagnosticEntry, DiagnosticEntryRef, DiagnosticGroup};
-pub use file_content::{
-    ByteContent, DecodedText, FILE_ANALYSIS_BYTES, analyze_byte_content, decode_text, encode_text,
-};
 pub use language_registry::{
     BinaryStatus, LanguageNotFound, LanguageQueries, LanguageRegistry, QueryFile,
     QueryFileContents, QueryFiles,
@@ -491,6 +489,7 @@ impl CachedLspAdapter {
 pub trait LspAdapterDelegate: Send + Sync {
     fn show_notification(&self, message: &str, cx: &mut App);
     fn http_client(&self) -> Arc<dyn HttpClient>;
+    fn background_executor(&self) -> &BackgroundExecutor;
     fn worktree_id(&self) -> WorktreeId;
     fn worktree_root_path(&self) -> &Path;
     fn resolve_relative_path(&self, path: PathBuf) -> PathBuf;
@@ -673,6 +672,7 @@ pub trait LspAdapter: 'static + Send + Sync + DynLspInstaller {
         &self,
         _command_name: &str,
         _arguments: &[serde_json::Value],
+        _path_style: PathStyle,
     ) -> Option<ClientCommand> {
         None
     }
@@ -1211,6 +1211,10 @@ impl Language {
             runs: runs.into(),
         }
     }
+            }
+        }
+        result
+    }
 
     pub fn path_suffixes(&self) -> &[String] {
         &self.config.matcher.path_suffixes
@@ -1447,22 +1451,20 @@ impl Debug for Language {
     }
 }
 
-pub(crate) fn parse_text(grammar: &Grammar, text: &Rope, old_tree: Option<Tree>) -> Tree {
+pub(crate) fn parse_text(grammar: &Grammar, text: &Rope, old_tree: Option<Tree>) -> Result<Tree> {
     with_parser(|parser| {
-        parser
-            .set_language(&grammar.ts_language)
-            .expect("incompatible grammar");
+        parser.set_language(&grammar.ts_language)?;
         let mut chunks = text.chunks_in_range(0..text.len());
         parser
             .parse_with_options(
                 &mut move |offset, _| {
                     chunks.seek(offset);
-                    chunks.next().unwrap_or("").as_bytes()
+                    chunks.peek_bytes().unwrap_or_default()
                 },
                 old_tree.as_ref(),
                 None,
             )
-            .unwrap()
+            .context("tree-sitter returned no tree")
     })
 }
 

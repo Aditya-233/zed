@@ -1,6 +1,7 @@
 use crate::{
     ButtonCommon, ButtonStyle, IconButtonShape, KeyBinding, List, ListItem, ListItemSpacing,
-    ListSeparator, ListSubHeader, Tooltip, prelude::*, utils::WithRemSize,
+    ListSeparator, ListSubHeader, Tooltip, prelude::*,
+    utils::{RetainedFocusExt as _, WithRemSize},
 };
 use gpui::{
     Action, Anchor, AnchoredPositionMode, AnyElement, AnyView, App, Bounds, DismissEvent, Entity,
@@ -347,7 +348,7 @@ impl ContextMenu {
         cx: &mut Context<Self>,
         f: impl FnOnce(Self, &mut Window, &mut Context<Self>) -> Self,
     ) -> Self {
-        let focus_handle = cx.focus_handle();
+        let focus_handle = cx.retained_focus_handle();
         let _on_blur_subscription = cx.on_blur(
             &focus_handle,
             window,
@@ -440,7 +441,7 @@ impl ContextMenu {
         cx.new(|cx| {
             let builder = Rc::new(builder);
 
-            let focus_handle = cx.focus_handle();
+            let focus_handle = cx.retained_focus_handle();
             let _on_blur_subscription = cx.on_blur(
                 &focus_handle,
                 window,
@@ -1484,7 +1485,7 @@ impl ContextMenu {
         cx: &mut App,
     ) -> Entity<ContextMenu> {
         cx.new(|cx| {
-            let focus_handle = cx.focus_handle();
+            let focus_handle = cx.retained_focus_handle();
 
             let _on_blur_subscription = cx.on_blur(
                 &focus_handle,
@@ -2362,6 +2363,7 @@ impl ContextMenu {
             )
             .into_any_element()
     }
+
 }
 
 impl ContextMenuItem {

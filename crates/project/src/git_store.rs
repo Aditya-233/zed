@@ -21,6 +21,7 @@ use buffer_diff::{
 use client::ProjectId;
 use collections::HashMap;
 pub use conflict_set::{ConflictRegion, ConflictSet, ConflictSetSnapshot, ConflictSetUpdate};
+use file_content::{decode_text, encode_text};
 use fs::{Fs, RemoveOptions};
 use futures::{
     FutureExt, SinkExt, Stream, StreamExt,
@@ -54,7 +55,7 @@ use gpui::{
     Subscription, Task, TaskExt, WeakEntity,
 };
 use language::{
-    Anchor, Buffer, BufferEvent, Capability, Language, LanguageRegistry, decode_text, encode_text,
+    Anchor, Buffer, BufferEvent, Capability, Language, LanguageRegistry,
     proto::{deserialize_version, serialize_version},
 };
 use parking_lot::Mutex;
@@ -120,6 +121,12 @@ pub struct GitStore {
 
 const MIN_PARKED_REPOSITORY_DEPTH: usize = 2;
 
+pub const MAX_CONCURRENT_OBJECT_READS: usize = 16;
+
+/// Git matches every pathspec against every index entry, so the cost of a
+/// scoped `git status`/`git diff` grows with the number of paths. On large
+/// repositories a scan of the whole repository is cheaper than this many paths.
+const MAX_SCOPED_STATUS_PATHS: usize = 64;
 #[derive(Clone, Debug)]
 pub struct ParkedRepository {
     worktree_id: WorktreeId,
@@ -212,7 +219,12 @@ fn pending_hunks(
 }
 
 fn decode_git_text(bytes: Vec<u8>) -> Result<String> {
-    Ok(decode_text(bytes)?.text)
+    let text = decode_text(bytes)?.text;
+    anyhow::ensure!(
+        !is_binary_content(text.as_bytes()),
+        "Binary files are not supported"
+    );
+    Ok(text)
 }
 
 #[derive(Debug)]
@@ -5228,6 +5240,14 @@ impl GitStore {
         }
 
         coalesced
+    }
+
+    fn limit_repo_paths(paths: Vec<RepoPath>) -> Vec<RepoPath> {
+        if paths.len() > MAX_SCOPED_STATUS_PATHS {
+            vec![RepoPath::from_rel_path(RelPath::empty())]
+        } else {
+            paths
+        }
     }
 
     fn process_updated_entries(
@@ -10361,7 +10381,7 @@ impl Repository {
                 }
             }
         });
-        cx.spawn(move |_: &mut AsyncApp| async move {
+        cx.background_spawn(async move {
             let (content, blame) = rx.await??;
             anyhow::ensure!(
                 !is_binary_content(content.as_bytes()),
@@ -10428,14 +10448,15 @@ impl Repository {
 
                 let changed_path_statuses = cx
                     .background_spawn(async move {
-                        let changed_paths = GitStore::coalesce_repo_paths(
-                            changed_paths
-                                .into_iter()
-                                .flatten()
-                                .collect::<BTreeSet<_>>()
-                                .into_iter()
-                                .collect(),
-                        );
+                        let changed_paths =
+                            GitStore::limit_repo_paths(GitStore::coalesce_repo_paths(
+                                changed_paths
+                                    .into_iter()
+                                    .flatten()
+                                    .collect::<BTreeSet<_>>()
+                                    .into_iter()
+                                    .collect(),
+                            ));
                         let changed_paths_vec = changed_paths.iter().cloned().collect::<Vec<_>>();
 
                         let status_task = backend.status(&changed_paths_vec);
@@ -10818,7 +10839,7 @@ async fn remove_empty_managed_worktree_ancestors(fs: &dyn Fs, child_path: &Path,
 pub fn repo_identity_path(common_dir: &Path, path_style: PathStyle) -> &Path {
     let is_dot_entry = path_style
         .file_name(common_dir)
-        .is_some_and(|n| n.starts_with('.'));
+        .is_some_and(|n| n.to_string_lossy().starts_with('.'));
     if is_dot_entry {
         path_style.parent(common_dir).unwrap_or(common_dir)
     } else {
@@ -11633,28 +11654,45 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_decode_git_text_windows_1251_one_line_change(cx: &mut TestAppContext) {
+    fn test_decode_git_text(cx: &mut TestAppContext) {
         let old_text = "строка один\nстрока два\n";
         let new_text = "строка один\nстрока три\n";
-        let (old_bytes, _, _) = encoding_rs::WINDOWS_1251.encode(old_text);
-        let (new_bytes, _, _) = encoding_rs::WINDOWS_1251.encode(new_text);
+        let sparse_nul_text = format!("{}\0", "a".repeat(4096));
+        for (encoding, has_bom) in [
+            (encoding_rs::WINDOWS_1251, false),
+            (encoding_rs::UTF_16LE, false),
+            (encoding_rs::UTF_16LE, true),
+            (encoding_rs::UTF_16BE, false),
+            (encoding_rs::UTF_16BE, true),
+        ] {
+            let old_bytes = encode_text(old_text.to_owned(), encoding, has_bom);
+            let new_bytes = encode_text(new_text.to_owned(), encoding, has_bom);
+            let decoded_old = decode_git_text(old_bytes).unwrap();
+            let decoded_new = decode_git_text(new_bytes).unwrap();
+            assert_eq!(decoded_old, old_text);
+            assert_eq!(decoded_new, new_text);
+            let buffer = cx.new(|cx| Buffer::local(decoded_new, cx));
+            let buffer_snapshot = buffer.read_with(cx, |buffer, _| buffer.snapshot());
+            let diff =
+                cx.new(|cx| BufferDiff::new_with_base_text(&decoded_old, &buffer_snapshot, cx));
+            let diff = diff.update(cx, |diff, cx| diff.snapshot(cx));
+            let hunks = diff.hunks(&buffer_snapshot).collect::<Vec<_>>();
+            let [hunk] = hunks.as_slice() else {
+                panic!("expected one modified hunk, got {hunks:?}");
+            };
 
-        let decoded_old = decode_git_text(old_bytes.into_owned()).unwrap();
-        let decoded_new = decode_git_text(new_bytes.into_owned()).unwrap();
-        let buffer = cx.new(|cx| Buffer::local(decoded_new, cx));
-        let buffer_snapshot = buffer.read_with(cx, |buffer, _| buffer.snapshot());
-        let diff = cx.new(|cx| BufferDiff::new_with_base_text(&decoded_old, &buffer_snapshot, cx));
-        let diff = diff.update(cx, |diff, cx| diff.snapshot(cx));
-        let hunks = diff.hunks(&buffer_snapshot).collect::<Vec<_>>();
-        let [hunk] = hunks.as_slice() else {
-            panic!("expected one modified hunk, got {hunks:?}");
-        };
-
-        assert_eq!(hunk.range, text::Point::new(1, 0)..text::Point::new(2, 0));
-        assert_eq!(
-            hunk.diff_base_byte_range,
-            old_text.find("строка два").unwrap()..old_text.len()
-        );
+            assert_eq!(hunk.range, text::Point::new(1, 0)..text::Point::new(2, 0));
+            assert_eq!(
+                hunk.diff_base_byte_range,
+                old_text.find("строка два").unwrap()..old_text.len()
+            );
+            assert_eq!(
+                decode_git_text(encode_text(sparse_nul_text.clone(), encoding, has_bom))
+                    .unwrap_err()
+                    .to_string(),
+                "Binary files are not supported"
+            );
+        }
     }
 
     #[gpui::test]
@@ -12252,6 +12290,19 @@ mod tests {
         let coalesced = GitStore::coalesce_repo_paths(repo_paths(&["", "src", "src/lib.rs"]));
 
         assert_eq!(coalesced, repo_paths(&[""]));
+    }
+
+    #[test]
+    fn limit_repo_paths_falls_back_to_root_above_threshold() {
+        let at_limit = (0..MAX_SCOPED_STATUS_PATHS)
+            .map(|index| repo_path(&format!("dir{index}/file.rs")))
+            .collect::<Vec<_>>();
+        assert_eq!(GitStore::limit_repo_paths(at_limit.clone()), at_limit);
+
+        let over_limit = (0..=MAX_SCOPED_STATUS_PATHS)
+            .map(|index| repo_path(&format!("dir{index}/file.rs")))
+            .collect::<Vec<_>>();
+        assert_eq!(GitStore::limit_repo_paths(over_limit), repo_paths(&[""]));
     }
 
     #[test]
