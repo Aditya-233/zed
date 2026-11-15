@@ -1299,6 +1299,7 @@ pub(crate) struct InputRateTracker {
     sustain_duration: Duration,
 }
 
+#[cfg(test)]
 const THIRTY_FPS_INTERVAL: Duration = Duration::from_micros(33333);
 const SIXTY_FPS_INTERVAL: Duration = Duration::from_micros(16667);
 const FRAME_INTERVAL_TOLERANCE: Duration = Duration::from_millis(1);

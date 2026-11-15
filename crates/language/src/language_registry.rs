@@ -29,6 +29,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use smallvec::SmallVec;
 use text::Rope;
 use theme::Theme;
 

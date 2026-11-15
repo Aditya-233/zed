@@ -7,7 +7,7 @@ use crate::{
     ThermalState, WindowAppearance, WindowParams, size,
 };
 #[cfg(any(test, feature = "test-support"))]
-use crate::{DisplayId, NoopTextSystem, PathPromptOptions};
+use crate::{NoopTextSystem, PathPromptOptions};
 use anyhow::Result;
 #[cfg(any(test, feature = "test-support"))]
 use collections::VecDeque;
